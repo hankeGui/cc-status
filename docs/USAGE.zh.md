@@ -114,16 +114,63 @@ ccs mode debug       # 六行，每个指标独占一行带标签
 
 切换会写到配置文件 `current_mode = "..."`，下次状态栏刷新立即生效。
 
-### 自定义模式
-
-打开配置文件：
+### 3.1 列出所有可选段
 
 ```sh
-ccs config-path             # 看路径
-# macOS: ~/Library/Application Support/dev.hanke.cc-status/config.toml
+ccs segments
 ```
 
-加一个新模式：
+会打印所有 `{name}` 段的列表 + 示例 + 中文说明。
+
+### 3.2 列出已有模式
+
+```sh
+ccs mode list      # 或：ccs mode（无参）
+```
+
+带星号的是当前模式。每个模式下方列出它的所有行模板。
+
+### 3.3 添加自定义模式（推荐方式）
+
+```sh
+ccs mode add mine \
+  -l "{dir} {git} {ctx}" \
+  -l "{last_turn} {hit_rate}" \
+  -l "{skills} {mcp}"
+```
+
+每个 `-l` 加一行。模板里 `{name}` 引用段，其它字符（包括标签 `last:`、空格、Unicode）原样输出。
+
+如果模式名已存在，需要加 `--force` 才会覆盖：
+
+```sh
+ccs mode add mine -l "{dir} {ctx}" --force
+```
+
+引用了未知段名时会有 warning，但不会拒绝保存（方便你引用未来版本的新段或纯文本）：
+
+```
+ccs mode add bad -l "{dir} {nonexistent}"
+warning: unknown segment(s) referenced: nonexistent (run `ccs segments` for the list)
+mode 'bad' saved with 1 line(s)
+```
+
+### 3.4 删除模式
+
+```sh
+ccs mode rm mine
+```
+
+如果删的是当前激活模式，会自动切到任意一个其他模式。不允许删除最后一个剩下的模式。
+
+### 3.5 直接编辑配置文件
+
+`ccs mode add` 本质上是修改 TOML，所以你也可以直接打开配置改：
+
+```sh
+ccs config-path
+# macOS: ~/Library/Application Support/dev.hanke.cc-status/config.toml
+```
 
 ```toml
 [modes.minimal]
@@ -136,11 +183,7 @@ lines = [
 ]
 ```
 
-然后：
-
-```sh
-ccs mode minimal
-```
+保存后 `ccs mode minimal` 即可生效。
 
 ---
 
@@ -283,7 +326,13 @@ ls -t ~/.claude/projects/-Users-YOU-path-to-project/*.jsonl | head -1
 ccs render                  # 给 CC 用的，读 stdin 输出 ANSI
 ccs status                  # 详情面板
 ccs explain                 # 图例
-ccs mode <name>             # 切模式 (compact / detailed / debug / 自定义)
+ccs segments                # 列出所有可选段
+ccs mode                    # = ccs mode list（列出所有模式）
+ccs mode list               # 列出所有已有模式
+ccs mode <name>             # 切到某模式
+ccs mode add <name> -l "..." [-l "..."] [--force]
+                            # 添加 / 覆盖自定义模式
+ccs mode rm <name>          # 删除模式
 ccs init                    # 写默认配置（如果不存在）
 ccs init --force            # 强制覆盖
 ccs config-path             # 打印配置文件路径

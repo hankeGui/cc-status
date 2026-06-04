@@ -145,3 +145,93 @@ pub fn set_mode(name: &str) -> Result<()> {
     println!("mode -> {}", name);
     Ok(())
 }
+
+pub fn add_mode(name: &str, lines: &[String], force: bool) -> Result<()> {
+    if name.is_empty() {
+        anyhow::bail!("mode name cannot be empty");
+    }
+    if lines.is_empty() {
+        anyhow::bail!("at least one --line is required");
+    }
+    // Validate referenced segment names; warn (not fail) on unknowns so users
+    // can still add literal text or future segments.
+    let mut unknowns: Vec<String> = Vec::new();
+    for line in lines {
+        for tok in extract_tokens(line) {
+            if !crate::segments_meta::is_known(&tok) {
+                unknowns.push(tok);
+            }
+        }
+    }
+    if !unknowns.is_empty() {
+        eprintln!(
+            "warning: unknown segment(s) referenced: {} (run `ccs segments` for the list)",
+            unknowns.join(", ")
+        );
+    }
+
+    let mut cfg = load()?;
+    if cfg.modes.contains_key(name) && !force {
+        anyhow::bail!("mode '{}' already exists; use --force to overwrite", name);
+    }
+    cfg.modes.insert(name.into(), Mode { lines: lines.to_vec() });
+    save(&cfg)?;
+    println!("mode '{}' saved with {} line(s)", name, lines.len());
+    println!("switch to it with: ccs mode {}", name);
+    Ok(())
+}
+
+pub fn remove_mode(name: &str) -> Result<()> {
+    let mut cfg = load()?;
+    if !cfg.modes.contains_key(name) {
+        anyhow::bail!("mode '{}' does not exist", name);
+    }
+    if cfg.modes.len() == 1 {
+        anyhow::bail!("cannot remove the only remaining mode");
+    }
+    if cfg.current_mode == name {
+        // Pick any remaining mode to switch to.
+        let next = cfg
+            .modes
+            .keys()
+            .find(|k| k.as_str() != name)
+            .cloned()
+            .unwrap();
+        eprintln!("active mode was '{}', switching to '{}'", name, next);
+        cfg.current_mode = next;
+    }
+    cfg.modes.remove(name);
+    save(&cfg)?;
+    println!("removed mode '{}'", name);
+    Ok(())
+}
+
+pub fn list_modes() -> Result<()> {
+    let cfg = load()?;
+    println!("当前模式: {}", cfg.current_mode);
+    println!();
+    for (name, mode) in &cfg.modes {
+        let marker = if name == &cfg.current_mode { "* " } else { "  " };
+        println!("{}{} ({} 行)", marker, name, mode.lines.len());
+        for line in &mode.lines {
+            println!("    {}", line);
+        }
+    }
+    Ok(())
+}
+
+/// Extract `{name}` tokens from a line template.
+fn extract_tokens(line: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = line;
+    while let Some(start) = rest.find('{') {
+        let after = &rest[start + 1..];
+        if let Some(end) = after.find('}') {
+            out.push(after[..end].to_string());
+            rest = &after[end + 1..];
+        } else {
+            break;
+        }
+    }
+    out
+}

@@ -4,8 +4,10 @@ use clap::{Parser, Subcommand};
 mod cache;
 mod config;
 mod explain;
+mod list_segments;
 mod render;
 mod segments;
+mod segments_meta;
 mod status;
 mod transcript;
 
@@ -25,8 +27,16 @@ enum Cmd {
     Status,
     /// Print a legend for every status-line segment.
     Explain,
-    /// Switch the current display mode.
-    Mode { name: String },
+    /// List every segment available for use in mode templates.
+    Segments,
+    /// Manage display modes (switch / add / remove / list).
+    Mode {
+        #[command(subcommand)]
+        action: Option<ModeAction>,
+        /// Mode name to switch to (when no subcommand is given).
+        #[arg(value_name = "NAME")]
+        name: Option<String>,
+    },
     /// Write a default config file. Use --force to overwrite an existing one.
     Init {
         #[arg(long)]
@@ -36,13 +46,53 @@ enum Cmd {
     ConfigPath,
 }
 
+#[derive(Subcommand)]
+enum ModeAction {
+    /// List all configured modes (current marked with *).
+    List,
+    /// Add or update a custom mode.
+    ///
+    /// Each --line/-l flag adds one line. Use `{segment}` placeholders
+    /// (run `ccs segments` for the list of available segments).
+    Add {
+        /// Name of the new mode.
+        name: String,
+        /// One line of the mode (repeatable).
+        #[arg(short = 'l', long = "line", required = true)]
+        lines: Vec<String>,
+        /// Overwrite if a mode with this name already exists.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Remove a mode.
+    Rm {
+        /// Name of the mode to remove.
+        name: String,
+    },
+    /// Switch to a named mode (alias for `ccs mode <name>`).
+    Set {
+        /// Mode to switch to.
+        name: String,
+    },
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.cmd.unwrap_or(Cmd::Render) {
         Cmd::Render => render::run(),
         Cmd::Status => status::run(),
         Cmd::Explain => explain::run(),
-        Cmd::Mode { name } => config::set_mode(&name),
+        Cmd::Segments => list_segments::run(),
+        Cmd::Mode { action, name } => match (action, name) {
+            (Some(ModeAction::List), _) => config::list_modes(),
+            (Some(ModeAction::Add { name, lines, force }), _) => {
+                config::add_mode(&name, &lines, force)
+            }
+            (Some(ModeAction::Rm { name }), _) => config::remove_mode(&name),
+            (Some(ModeAction::Set { name }), _) => config::set_mode(&name),
+            (None, Some(name)) => config::set_mode(&name),
+            (None, None) => config::list_modes(),
+        },
         Cmd::Init { force } => config::init_default(force),
         Cmd::ConfigPath => {
             println!("{}", config::config_path()?.display());

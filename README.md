@@ -56,8 +56,19 @@ The bar at the top of every Claude Code prompt. Choose a layout:
 
 ```sh
 ccs mode compact     # one line, the basics
-ccs mode detailed    # three lines, all metrics (default)
+ccs mode detailed    # three lines, all metrics
 ccs mode debug       # six lines, one metric per line with labels
+```
+
+Or build your own:
+
+```sh
+ccs segments                                    # see all available segments
+ccs mode add mine -l "{dir} {git} {ctx}" \
+                  -l "{last_turn} {hit_rate}"   # define a 2-line mode
+ccs mode mine                                   # switch to it
+ccs mode list                                   # show all modes
+ccs mode rm mine                                # delete one
 ```
 
 ### 2. The detail panel (`ccs status`)

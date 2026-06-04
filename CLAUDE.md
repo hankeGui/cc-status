@@ -62,12 +62,13 @@ Workflow:
 
 1. Implement `fn seg_<name>(ctx: &Ctx) -> String` in `src/segments.rs`.
 2. Add a match arm in `pub fn render(name, ctx)` in the same file.
-3. Update three docs in lockstep:
+3. Add a `SegmentInfo` entry in `src/segments_meta.rs` (this drives `ccs segments` output and validation in `mode add`).
+4. Update three docs in lockstep:
    - `README.md` — Segments table.
    - `docs/USAGE.zh.md` — 状态栏每段含义.
    - `src/explain.rs` — the legend printed by `ccs explain`.
-4. If the segment surfaces a new metric, also surface it in `src/status.rs` (the dashboard).
-5. Smoke-test with synthetic stdin (see "Common commands"). Empty/missing data must yield `""` (the renderer collapses surrounding whitespace).
+5. If the segment surfaces a new metric, also surface it in `src/status.rs` (the dashboard).
+6. Smoke-test with synthetic stdin (see "Common commands"). Empty/missing data must yield `""` (the renderer collapses surrounding whitespace).
 
 ## When changing capacity / context display
 
