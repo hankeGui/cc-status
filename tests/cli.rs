@@ -44,7 +44,7 @@ fn version_flag() {
 fn explain_lists_segments() {
     let tmp = TempDir::new().unwrap();
     ccs(&tmp).arg("explain").assert().success().stdout(
-        predicate::str::contains("图例")
+        predicate::str::contains("legend")
             .and(predicate::str::contains("ctx"))
             .and(predicate::str::contains("cache")),
     );

@@ -79,17 +79,17 @@ pub fn run() -> Result<()> {
         .pointer("/context_window/remaining_percentage")
         .and_then(|v| v.as_f64());
 
-    println!("{B}┌─ cc-status · 当前会话{R}", B = BOLD, R = RESET);
+    println!("{B}┌─ cc-status · current session{R}", B = BOLD, R = RESET);
 
-    // --- 基础信息 ---
-    println!("{B}│ 环境{R}", B = BOLD, R = RESET);
-    println!("│   目录       {}", cwd);
-    println!("│   模型       {}", model);
-    println!("│   会话 ID    {}{}{}", DIM, session_id, RESET);
-    println!("│   显示模式   {}", cfg.current_mode);
+    // --- environment ---
+    println!("{B}│ Environment{R}", B = BOLD, R = RESET);
+    println!("│   cwd          {}", cwd);
+    println!("│   model        {}", model);
+    println!("│   session id   {}{}{}", DIM, session_id, RESET);
+    println!("│   mode         {}", cfg.current_mode);
 
     // --- context ---
-    println!("{B}│ Context 窗口{R}", B = BOLD, R = RESET);
+    println!("{B}│ Context window{R}", B = BOLD, R = RESET);
     let used = sess.last_turn_input + sess.last_turn_cache_read + sess.last_turn_cache_creation;
     if let (Some(p), true) = (
         ctx_pct,
@@ -114,43 +114,42 @@ pub fn run() -> Result<()> {
             GREEN
         };
         let label = if (remaining_pct as u8) < cfg.theme.ctx_low {
-            "危险，建议清理或新开会话"
+            "danger — clean up or start a fresh session"
         } else if (remaining_pct as u8) < cfg.theme.ctx_med {
-            "中等，留意长上下文"
+            "warning — watch the long context"
         } else {
-            "健康"
+            "healthy"
         };
         println!(
-            "│   已用 / 可用   {} / {} tokens  ({}{}%{} 剩余)",
+            "│   used / cap    {} / {} tokens  ({}{}%{} remaining)",
             short_num(used),
             short_num(capacity),
             color,
             remaining_pct,
             RESET
         );
-        println!("│   状态         {}{}{}", color, label, RESET);
+        println!("│   status       {}{}{}", color, label, RESET);
         println!(
-            "│   {}物理窗口 {}, auto-compact 阈值 {}%（CLAUDE_AUTOCOMPACT_PCT_OVERRIDE）{}",
+            "│   {}physical window {}, auto-compact at {}% (CLAUDE_AUTOCOMPACT_PCT_OVERRIDE){}",
             DIM,
             short_num(physical.round() as u64),
             pct_override.round() as i64,
             RESET
         );
-        // CC 自己报的剩余百分比也展示一下，方便对照
         let _ = p;
     } else if let Some(p) = ctx_pct {
         let pct_i = p.round() as i64;
         println!(
-            "│   CC 报剩余  {}%  {}(没有上一轮 token 数据，无法反推容量){}",
+            "│   CC reports   {}% remaining  {}(no last-turn token data, can't backsolve capacity){}",
             pct_i, DIM, RESET
         );
     } else {
-        println!("│   剩余       {}(无数据){}", DIM, RESET);
+        println!("│   remaining    {}(no data){}", DIM, RESET);
     }
 
-    // --- 上一轮 ---
+    // --- last turn ---
     println!(
-        "{B}│ 上一轮（最近一次 assistant 回复）{R}",
+        "{B}│ Last turn (most recent assistant reply){R}",
         B = BOLD,
         R = RESET
     );
@@ -159,7 +158,7 @@ pub fn run() -> Result<()> {
         + sess.last_turn_cache_read
         + sess.last_turn_cache_creation;
     if lt_total == 0 {
-        println!("│   {}还没有数据（会话刚开始？）{}", DIM, RESET);
+        println!("│   {}no data yet (session just started?){}", DIM, RESET);
     } else {
         let total_in =
             sess.last_turn_input + sess.last_turn_cache_read + sess.last_turn_cache_creation;
@@ -170,65 +169,70 @@ pub fn run() -> Result<()> {
             0
         };
         println!(
-            "│   发送 input  {} tokens（含 cache hit）",
+            "│   sent input   {} tokens (incl. cache hits)",
             short_num(total_in)
         );
         println!(
-            "│     ├ 命中缓存 {} {}({}× 折扣价){}",
+            "│     ├ cache hit       {} {}(0.1× discount){}",
             short_num(sess.last_turn_cache_read),
             DIM,
-            "0.1",
             RESET
         );
         println!(
-            "│     ├ 写入缓存 {} {}(1.25× 贵价，下次能命中){}",
+            "│     ├ cache write     {} {}(1.25× premium, hit-able next turn){}",
             short_num(sess.last_turn_cache_creation),
             DIM,
             RESET
         );
         println!(
-            "│     └ 新 input  {} {}(普通 input 价){}",
+            "│     └ fresh input     {} {}(normal input price){}",
             short_num(sess.last_turn_input),
             DIM,
             RESET
         );
-        println!("│   模型输出  {} tokens", short_num(sess.last_turn_output));
-        println!("│   命中率    {}{}%{}", color_for_hit(hit), hit, RESET);
+        println!("│   model output {} tokens", short_num(sess.last_turn_output));
+        println!("│   hit rate     {}{}%{}", color_for_hit(hit), hit, RESET);
     }
 
-    // --- 缓存窗口 ---
-    println!("{B}│ Prompt Cache（5min TTL）{R}", B = BOLD, R = RESET);
+    // --- prompt cache ---
+    println!("{B}│ Prompt Cache (5-min TTL){R}", B = BOLD, R = RESET);
     if let Some(ms) = sess.last_cache_read_ms {
         let now_ms = Utc::now().timestamp_millis();
         let elapsed_s = ((now_ms - ms) / 1000).max(0);
         let ttl_s = 5 * 60;
         if elapsed_s >= ttl_s {
-            println!("│   状态       {}已过期 — 下次提问会重建缓存{}", DIM, RESET);
+            println!(
+                "│   status       {}expired — next turn will rebuild the cache{}",
+                DIM, RESET
+            );
         } else {
             let remaining = ttl_s - elapsed_s;
             let mm = remaining / 60;
             let ss = remaining % 60;
             let color = if remaining < 60 { RED } else { GREEN };
             let hint = if remaining < 60 {
-                "趁还没过期赶快发"
+                "send your next message before it expires"
             } else {
-                "缓存有效"
+                "cache is fresh"
             };
             println!(
-                "│   剩余       {}{}:{:02}{}  {}{}{}",
+                "│   remaining    {}{}:{:02}{}  {}{}{}",
                 color, mm, ss, RESET, DIM, hint, RESET
             );
         }
     } else {
-        println!("│   状态       {}本会话还没命中过缓存{}", DIM, RESET);
+        println!(
+            "│   status       {}cache has never been hit this session{}",
+            DIM, RESET
+        );
     }
 
-    // --- 会话累计 ---
-    println!("{B}│ 会话累计{R}", B = BOLD, R = RESET);
+    // --- session cumulative ---
+    println!("{B}│ Session totals{R}", B = BOLD, R = RESET);
     let tot_base = sess.total_input + sess.total_cache_read + sess.total_cache_creation;
     if sess.total_input + sess.total_output + sess.total_cache_read + sess.total_cache_creation == 0
     {
-        println!("│   {}还没有数据{}", DIM, RESET);
+        println!("│   {}no data yet{}", DIM, RESET);
     } else {
         let hit = if tot_base > 0 {
             (sess.total_cache_read as f64 / tot_base as f64 * 100.0).round() as u32
@@ -236,11 +240,11 @@ pub fn run() -> Result<()> {
             0
         };
         println!(
-            "│   总 input    {} tokens",
+            "│   total input    {} tokens",
             short_num(sess.total_input + sess.total_cache_read + sess.total_cache_creation)
         );
-        println!("│   总 output   {} tokens", short_num(sess.total_output));
-        println!("│   总命中率    {}{}%{}", color_for_hit(hit), hit, RESET);
+        println!("│   total output   {} tokens", short_num(sess.total_output));
+        println!("│   overall hit    {}{}%{}", color_for_hit(hit), hit, RESET);
         if let (Some(first), Some(last)) = (sess.first_turn_ms, sess.last_turn_ms) {
             let elapsed_ms = (last - first).max(0);
             if elapsed_ms >= 1000 {
@@ -251,16 +255,19 @@ pub fn run() -> Result<()> {
                 let rate = total as f64 * 60_000.0 / elapsed_ms as f64;
                 let mins = elapsed_ms / 60_000;
                 let secs = (elapsed_ms / 1000) % 60;
-                println!("│   会话时长    {}m{:02}s", mins, secs);
-                println!("│   平均速率    {} tokens/min", short_num(rate as u64));
+                println!("│   duration       {}m{:02}s", mins, secs);
+                println!("│   avg rate       {} tokens/min", short_num(rate as u64));
             }
         }
     }
 
-    // --- 工具 ---
-    println!("{B}│ 工具调用{R}", B = BOLD, R = RESET);
+    // --- tool calls ---
+    println!("{B}│ Tool calls{R}", B = BOLD, R = RESET);
     if sess.skill_counts.is_empty() && sess.mcp_counts.is_empty() {
-        println!("│   {}本会话没用过 Skill / MCP{}", DIM, RESET);
+        println!(
+            "│   {}no Skill / MCP calls in this session{}",
+            DIM, RESET
+        );
     } else {
         if sess.skill_counts.is_empty() {
             println!("│   Skills    {}—{}", DIM, RESET);
@@ -275,7 +282,10 @@ pub fn run() -> Result<()> {
     }
 
     println!("{B}└─{R}", B = BOLD, R = RESET);
-    println!("{}用 `ccs explain` 查看状态栏每个段的图例。{}", DIM, RESET);
+    println!(
+        "{}Run `ccs explain` for the status-line legend.{}",
+        DIM, RESET
+    );
     Ok(())
 }
 

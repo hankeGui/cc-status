@@ -12,62 +12,62 @@ pub const SEGMENTS: &[SegmentInfo] = &[
     SegmentInfo {
         name: "dir",
         example: "~/hanke-dev/cc-status",
-        description: "当前目录（最后 3 段路径，~ 代表 HOME）",
+        description: "Current directory (last 3 path components, ~ for HOME)",
     },
     SegmentInfo {
         name: "git",
         example: "wt:foo main ⇡2⇣1 [+!?]",
-        description: "git worktree / 分支 / 领先落后 / + 暂存 ! 修改 ? 未跟踪",
+        description: "Git worktree / branch / ahead-behind / + staged ! modified ? untracked",
     },
     SegmentInfo {
         name: "model",
         example: "Claude Opus 4.7",
-        description: "当前对话的模型名",
+        description: "Model name reported by Claude Code",
     },
     SegmentInfo {
         name: "ctx",
         example: "ctx 86% █████▏ 154.6k/950k",
-        description: "context 剩余 % + 进度条 + 已用/可用容量",
+        description: "Context remaining % + bar + used/capacity",
     },
     SegmentInfo {
         name: "ctx_tokens",
         example: "154.6k/950k",
-        description: "只显示 token 数（已用/可用），不带百分比和进度条",
+        description: "Token numbers only (used/capacity), no percent or bar",
     },
     SegmentInfo {
         name: "last_turn",
         example: "↑12.3k ↓2.1k +865 🎯89%",
-        description: "上一轮 input↑ output↓ 写入cache+ 命中率🎯",
+        description: "Last turn: input↑ output↓ cache write+ hit rate🎯",
     },
     SegmentInfo {
         name: "cache_ttl",
         example: "cache 3:42",
-        description: "prompt cache 5min TTL 倒计时（红色 < 1min / cache expired）",
+        description: "Prompt-cache 5-min TTL countdown (red < 1 min / cache expired)",
     },
     SegmentInfo {
         name: "hit_rate",
         example: "hit 96%",
-        description: "整会话累计 cache 命中率",
+        description: "Session-wide cumulative cache hit rate",
     },
     SegmentInfo {
         name: "burn",
         example: "🔥 32.4k/min",
-        description: "会话平均 token 速率",
+        description: "Session-average token rate",
     },
     SegmentInfo {
         name: "skills",
         example: "skills: jira×3 wiki×1",
-        description: "Skill 调用次数（按次数倒序，最多 4 个）",
+        description: "Skill calls (top 4, sorted by count)",
     },
     SegmentInfo {
         name: "mcp",
         example: "mcp: github×2",
-        description: "MCP 服务器调用次数（按服务器聚合）",
+        description: "MCP-server calls (aggregated by server name)",
     },
     SegmentInfo {
         name: "mode",
         example: "[detailed]",
-        description: "当前模式名（暗色）",
+        description: "Current mode label (dim)",
     },
 ];
 

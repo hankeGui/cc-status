@@ -8,10 +8,10 @@ const DIM: &str = "\x1b[2m";
 const CYAN: &str = "\x1b[1;36m";
 
 pub fn run() -> anyhow::Result<()> {
-    println!("{B}cc-status · 可选段{R}", B = BOLD, R = RESET);
+    println!("{B}cc-status · available segments{R}", B = BOLD, R = RESET);
     println!();
     println!(
-        "在 mode 的 lines 模板里用 {C}{{name}}{R} 引用任何段。例如：",
+        "Reference any segment from a mode's lines as {C}{{name}}{R}. Example:",
         C = CYAN,
         R = RESET
     );
@@ -32,9 +32,9 @@ pub fn run() -> anyhow::Result<()> {
         + 2;
 
     println!(
-        "{B}{:<nw$}{:<ew$}说明{R}",
-        "段",
-        "示例",
+        "{B}{:<nw$}{:<ew$}description{R}",
+        "segment",
+        "example",
         nw = name_w,
         ew = ex_w,
         B = BOLD,
@@ -62,10 +62,10 @@ pub fn run() -> anyhow::Result<()> {
         );
     }
     println!();
-    println!("{B}下一步{R}", B = BOLD, R = RESET);
-    println!("  ccs mode list                          列出所有已有模式");
-    println!("  ccs mode add <name> -l \"<line>\" ...    建一个新模式");
-    println!("  ccs mode <name>                        切换到该模式");
+    println!("{B}Next steps{R}", B = BOLD, R = RESET);
+    println!("  ccs mode list                          List all configured modes");
+    println!("  ccs mode add <name> -l \"<line>\" ...    Create a new mode");
+    println!("  ccs mode <name>                        Switch to that mode");
     Ok(())
 }
 

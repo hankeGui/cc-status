@@ -12,49 +12,50 @@ const DIM: &str = "\x1b[2m";
 pub fn run() -> anyhow::Result<()> {
     let out = format!(
         "\
-{B}cc-status · 状态栏图例{R}
+{B}cc-status · status-line legend{R}
 
-{B}第一行 · 环境{R}
-  {C}~/path{R}                当前目录（最后 3 段路径，~ 代表 HOME）
-  {DIM}wt:NAME{R}               git worktree 名（不在 worktree 时不显示）
-  {M}branch{R}                git 分支名
-  {DIM}⇡N{R} / {DIM}⇣N{R}              比远端领先 / 落后 N 个 commit
-  {RED}[+!?]{R}                 + 已暂存   ! 已修改   ? 未跟踪
-  {DIM}模型名{R}                  当前对话使用的模型
+{B}Line 1 · environment{R}
+  {C}~/path{R}                Current directory (last 3 components, ~ for HOME)
+  {DIM}wt:NAME{R}               Git worktree name (only when inside one)
+  {M}branch{R}                Git branch
+  {DIM}⇡N{R} / {DIM}⇣N{R}              Commits ahead of / behind upstream
+  {RED}[+!?]{R}                 + staged   ! modified   ? untracked
+  {DIM}model{R}                 Model name reported by Claude Code
 
-{B}第二行 · 本轮 + 缓存{R}
-  ctx {GREEN}84%{R} {GREEN}█████{R} {DIM}133k/950k{R}  剩余比例 + 已用/可用容量（绿 ≥50  黄 20–50  红 <20）
-                        可用 = 反推出的物理窗口 × CLAUDE_AUTOCOMPACT_PCT_OVERRIDE / 100
-                        默认 95%。比如 1M Opus 的可用容量约 950k，超过即触发 compact。
-  {DIM}↑12.3k{R}                上一轮 input token（含 cache hit）
-  {DIM}↓341{R}                  上一轮 output token
-  {DIM}+865{R}                  本轮新写入 cache 的 token（cache_creation, 1.25× 价）
-  {DIM}🎯99%{R}                 上一轮缓存命中率
-  {DIM}cache 4:42{R}            缓存 5min TTL 倒计时（{RED}红色 < 1min{R} / cache expired）
-  {DIM}hit 96%{R}               整会话累计命中率
-  {DIM}🔥 32.4k/min{R}          会话平均 token 速率
+{B}Line 2 · this turn + cache{R}
+  ctx {GREEN}84%{R} {GREEN}█████{R} {DIM}133k/950k{R}  Remaining % + bar + used/capacity
+                        (green ≥50, yellow 20–50, red <20)
+                        capacity = backsolved physical window × CLAUDE_AUTOCOMPACT_PCT_OVERRIDE/100
+                        Default 95. A 1M Opus thus shows ~950k usable.
+  {DIM}↑12.3k{R}                Last turn's input tokens (incl. cache hit)
+  {DIM}↓341{R}                  Last turn's output tokens
+  {DIM}+865{R}                  Tokens written to cache this turn (cache_creation, 1.25× price)
+  {DIM}🎯99%{R}                 Cache hit rate of the last turn
+  {DIM}cache 4:42{R}            Prompt-cache 5-min TTL countdown ({RED}red <1 min{R} / cache expired)
+  {DIM}hit 96%{R}               Session-wide cumulative cache hit rate
+  {DIM}🔥 32.4k/min{R}          Session-average token rate
 
-{B}第三行 · 本会话工具调用{R}
-  {DIM}skills: jira×3 wiki×1{R}  Skill 工具调用次数（按次数倒序，最多 4 个）
-  {DIM}mcp: github×2{R}         MCP 服务器调用次数（按服务器聚合）
+{B}Line 3 · tools used in this session{R}
+  {DIM}skills: jira×3 wiki×1{R}  Skill tool calls (top 4, sorted by count)
+  {DIM}mcp: github×2{R}         MCP-server calls (aggregated by server name)
 
-{B}颜色含义{R}
-  {C}加粗青{R}     路径
-  {M}加粗紫{R}     git 分支
-  {RED}红{R}        危险（dirty / ctx 低 / cache 即将过期）
-  {YELLOW}黄{R}        中等（ctx 20–50%）
-  {GREEN}绿{R}        健康（ctx ≥50%）
-  {DIM}暗色{R}       次要数据
+{B}Color meanings{R}
+  {C}bold cyan{R}    path
+  {M}bold magenta{R} git branch
+  {RED}red{R}          danger (dirty / low ctx / cache about to expire)
+  {YELLOW}yellow{R}       warning (ctx 20–50%)
+  {GREEN}green{R}        healthy (ctx ≥50%)
+  {DIM}dim{R}          secondary data
 
-{B}计费速查{R}
-  cache_read       0.1× 普通 input 价（命中越高越便宜）
-  cache_creation   1.25× 普通 input 价（写入贵，但下次能命中）
-  output           ~5× 普通 input 价
+{B}Pricing cheat-sheet{R}
+  cache_read       0.1× normal input price (higher hit rate = cheaper)
+  cache_creation   1.25× normal input price (pricey now, but cheap on the next turn)
+  output           ~5× normal input price
 
-{B}相关命令{R}
-  ccs status            打印当前会话详情面板（不输出 ANSI 也好读）
-  ccs mode <name>       切换显示模式：compact / detailed / debug
-  ccs config-path       配置文件位置
+{B}Related commands{R}
+  ccs status            Detailed dashboard for the current session
+  ccs mode <name>       Switch display mode: compact / detailed / debug
+  ccs config-path       Print the config file path
 ",
         B = BOLD,
         R = RESET,

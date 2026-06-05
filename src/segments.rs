@@ -180,7 +180,7 @@ fn seg_ctx(ctx: &Ctx) -> String {
     let Some(c) = compute_ctx(ctx) else {
         return String::new();
     };
-    // remaining_frac = 距离 compact 还剩多少（0..1）
+    // remaining_frac = how much room is left before auto-compact (0..1)
     let remaining_frac = (1.0 - c.used_frac).clamp(0.0, 1.0);
     let pct_i = (remaining_frac * 100.0).round() as i64;
     let color = if (pct_i as u8) < ctx.cfg.theme.ctx_low {

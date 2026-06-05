@@ -237,7 +237,7 @@ pub fn remove_mode(name: &str) -> Result<()> {
 
 pub fn list_modes() -> Result<()> {
     let cfg = load()?;
-    println!("当前模式: {}", cfg.current_mode);
+    println!("Current mode: {}", cfg.current_mode);
     println!();
     for (name, mode) in &cfg.modes {
         let marker = if name == &cfg.current_mode {
@@ -245,7 +245,7 @@ pub fn list_modes() -> Result<()> {
         } else {
             "  "
         };
-        println!("{}{} ({} 行)", marker, name, mode.lines.len());
+        println!("{}{} ({} line(s))", marker, name, mode.lines.len());
         for line in &mode.lines {
             println!("    {}", line);
         }
