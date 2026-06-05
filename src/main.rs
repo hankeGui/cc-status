@@ -81,6 +81,28 @@ enum ModeAction {
         #[arg(long)]
         force: bool,
     },
+    /// Append segments to a mode without rewriting it.
+    ///
+    /// By default appends a new line to the *current* mode. Pass
+    /// `--mode <name>` to target another mode and `--line <N>` (1-based)
+    /// to append at the end of an existing line instead of a new one.
+    Append {
+        /// Segments to append. Either bare names (`ctx`) or already
+        /// wrapped (`{ctx}`); literal text such as `cache:` is also OK.
+        #[arg(required = true)]
+        segments: Vec<String>,
+        /// Target mode (default: current).
+        #[arg(long)]
+        mode: Option<String>,
+        /// Append to an existing line (1-based). Default: new line.
+        #[arg(long)]
+        line: Option<usize>,
+    },
+    /// Open a mode in $EDITOR for free-form editing.
+    Edit {
+        /// Mode to edit (default: current).
+        name: Option<String>,
+    },
     /// Remove a mode.
     Rm {
         /// Name of the mode to remove.
@@ -114,6 +136,15 @@ fn main() -> Result<()> {
             (Some(ModeAction::Add { name, lines, force }), _) => {
                 config::add_mode(&name, &lines, force)
             }
+            (
+                Some(ModeAction::Append {
+                    segments,
+                    mode,
+                    line,
+                }),
+                _,
+            ) => config::append_segments(mode.as_deref(), &segments, line),
+            (Some(ModeAction::Edit { name }), _) => config::edit_mode(name.as_deref()),
             (Some(ModeAction::Rm { name }), _) => config::remove_mode(&name),
             (Some(ModeAction::Set { name }), _) => config::set_mode(&name),
             (None, Some(name)) => config::set_mode(&name),

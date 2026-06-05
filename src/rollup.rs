@@ -127,13 +127,25 @@ fn update_one_file(path: &Path, r: &mut Rollup) -> Result<()> {
     let key = path.to_string_lossy().to_string();
     let mut state = r.files.remove(&key).unwrap_or_default();
 
-    if state.file_id != id || size < state.offset {
-        // File rotated/truncated — reset its state. (We don't try to
-        // un-account any previously-folded counts; this is a known
-        // limitation, called out in CLAUDE.md.)
+    // Detect rotation/truncation. On Unix the inode change is the
+    // canonical signal; on other platforms `file_id` is a hash of
+    // (mtime, len) and changes on every append, so we can't use it
+    // to detect rotation — fall back to "did the file shrink below
+    // our last offset?".
+    let rotated = if cfg!(unix) {
+        state.file_id != 0 && state.file_id != id
+    } else {
+        false
+    } || size < state.offset;
+
+    if rotated {
+        // File was replaced or truncated — start over for this path.
+        // (We don't subtract previously-folded counts; that's a
+        // known accounting drift.)
         state = FileState::default();
     }
     if size == state.offset {
+        state.file_id = id;
         r.files.insert(key, state);
         return Ok(());
     }

@@ -130,20 +130,28 @@ cc-status follows a "passive bar + on-demand panel" design. You don't need to re
 The bar at the top of every Claude Code prompt. Choose a layout:
 
 ```sh
-ccs mode compact     # one line, the basics
-ccs mode detailed    # three lines, all metrics
-ccs mode debug       # six lines, one metric per line with labels
+ccs mode compact     # 1 line, the basics (default)
+ccs mode minimal     # 1 line, just dir + ctx
+ccs mode detailed    # 3 lines, all metrics
+ccs mode cost        # 2 lines focused on $ spent
+ccs mode tokens      # 3 lines focused on token flow
+ccs mode tools       # 3 lines focused on Skill / MCP usage
+ccs mode debug       # 8 lines, one metric per line with labels
 ```
 
-Or build your own:
+Or build your own without rewriting:
 
 ```sh
-ccs segments                                    # see all available segments
-ccs mode add mine -l "{dir} {git} {ctx}" \
-                  -l "{last_turn} {hit_rate}"   # define a 2-line mode
-ccs mode mine                                   # switch to it
-ccs mode list                                   # show all modes
-ccs mode rm mine                                # delete one
+ccs segments                                      # see all segments
+ccs mode append cost_today                        # append a new line to current mode
+ccs mode append hit_rate burn                     # append several segments together
+ccs mode append --line 1 git                      # append to an existing line
+ccs mode append --mode detailed cost_today        # target a specific mode
+ccs mode edit                                     # full edit in $EDITOR
+ccs mode add mine -l "{dir} {git}" \
+                  -l "{last_turn} {hit_rate}"     # define a brand-new mode
+ccs mode list                                     # show all modes
+ccs mode rm mine                                  # delete one
 ```
 
 ### 2. The detail panel (`ccs status`)

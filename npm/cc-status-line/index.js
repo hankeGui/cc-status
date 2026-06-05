@@ -20,7 +20,8 @@ function resolveBinary() {
     "darwin-arm64": "@cc-status-line/darwin-arm64",
     "linux-x64": "@cc-status-line/linux-x64",
     "linux-arm64": "@cc-status-line/linux-arm64",
-    "win32-x64": "@cc-status-line/win32-x64",
+    // win32-x64 is temporarily disabled. Windows users should build
+    // from source: https://github.com/hankeGui/cc-status
   };
 
   const key = `${platform}-${arch}`;

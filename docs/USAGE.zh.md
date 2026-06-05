@@ -188,12 +188,16 @@ ccs explain
 
 ## 3. 切换显示模式
 
-cc-status 内置三种预设模式：
+cc-status 内置 7 个预设模式：
 
 ```sh
-ccs mode compact     # 单行，仅 dir/git/model/ctx
-ccs mode detailed    # 三行，全部指标（默认）
-ccs mode debug       # 六行，每个指标独占一行带标签
+ccs mode compact     # 单行，基础信息（默认）
+ccs mode minimal     # 单行，只 dir + ctx，最简
+ccs mode detailed    # 三行，所有指标
+ccs mode cost        # 两行，专注美元成本
+ccs mode tokens      # 三行，专注 token 流（上轮+命中率+速率+缓存 TTL）
+ccs mode tools       # 三行，专注 Skill / MCP 调用
+ccs mode debug       # 八行，每个指标独占一行带标签
 ```
 
 切换会写到配置文件 `current_mode = "..."`，下次状态栏刷新立即生效。
@@ -204,7 +208,7 @@ ccs mode debug       # 六行，每个指标独占一行带标签
 ccs segments
 ```
 
-会打印所有 `{name}` 段的列表 + 示例 + 中文说明。
+会打印所有 `{name}` 段的列表 + 示例 + 说明。
 
 ### 3.2 列出已有模式
 
@@ -214,7 +218,34 @@ ccs mode list      # 或：ccs mode（无参）
 
 带星号的是当前模式。每个模式下方列出它的所有行模板。
 
-### 3.3 添加自定义模式（推荐方式）
+### 3.3 快速给当前模式加段（推荐）
+
+```sh
+# 给当前模式末尾加新行
+ccs mode append cost_today
+
+# 多个段加同一行
+ccs mode append hit_rate burn cache_ttl
+
+# 加到指定行末尾（1-based）
+ccs mode append --line 1 git
+
+# 给非当前模式加段
+ccs mode append --mode detailed cost_today
+```
+
+`{name}` 既可以写 `cost_today`（裸名）也可以写 `{cost_today}`。引用未知段会 warn 但仍会保存。
+
+### 3.4 用编辑器自由编辑
+
+```sh
+ccs mode edit              # 编辑当前模式
+ccs mode edit detailed     # 编辑指定模式
+```
+
+打开 `$EDITOR`（或 `VISUAL`，默认 `vi`）。每行一个模板，空行和 `#` 开头的注释会被忽略。保存退出即生效。
+
+### 3.5 添加完整自定义模式
 
 ```sh
 ccs mode add mine \
@@ -223,23 +254,9 @@ ccs mode add mine \
   -l "{skills} {mcp}"
 ```
 
-每个 `-l` 加一行。模板里 `{name}` 引用段，其它字符（包括标签 `last:`、空格、Unicode）原样输出。
+每个 `-l` 加一行。模式名已存在时需要 `--force`。
 
-如果模式名已存在，需要加 `--force` 才会覆盖：
-
-```sh
-ccs mode add mine -l "{dir} {ctx}" --force
-```
-
-引用了未知段名时会有 warning，但不会拒绝保存（方便你引用未来版本的新段或纯文本）：
-
-```
-ccs mode add bad -l "{dir} {nonexistent}"
-warning: unknown segment(s) referenced: nonexistent (run `ccs segments` for the list)
-mode 'bad' saved with 1 line(s)
-```
-
-### 3.4 删除模式
+### 3.6 删除模式
 
 ```sh
 ccs mode rm mine
@@ -247,9 +264,9 @@ ccs mode rm mine
 
 如果删的是当前激活模式，会自动切到任意一个其他模式。不允许删除最后一个剩下的模式。
 
-### 3.5 直接编辑配置文件
+### 3.7 直接编辑配置文件
 
-`ccs mode add` 本质上是修改 TOML，所以你也可以直接打开配置改：
+`ccs mode add` / `append` / `edit` 本质上都是改 TOML，所以你也可以打开配置直接改：
 
 ```sh
 ccs config-path
@@ -425,6 +442,9 @@ ccs mode list               # 列出所有已有模式
 ccs mode <name>             # 切到某模式
 ccs mode add <name> -l "..." [-l "..."] [--force]
                             # 添加 / 覆盖自定义模式
+ccs mode append <seg> [seg2 ...] [--mode N] [--line K]
+                            # 给当前/指定模式末尾加段（推荐）
+ccs mode edit [name]        # 在 $EDITOR 里编辑模式
 ccs mode rm <name>          # 删除模式
 ccs init                    # 写默认配置（如果不存在）
 ccs init --force            # 强制覆盖

@@ -163,6 +163,114 @@ fn mode_set_rejects_unknown() {
 }
 
 #[test]
+fn mode_append_creates_new_line() {
+    let tmp = TempDir::new().unwrap();
+    // Default current mode is `compact` with one line.
+    ccs(&tmp)
+        .args(["mode", "append", "cost_today"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("appended new line"));
+
+    let assert = ccs(&tmp).args(["mode", "list"]).assert().success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).to_string();
+    assert!(stdout.contains("compact (2 line(s))"), "got: {}", stdout);
+    assert!(stdout.contains("{cost_today}"));
+}
+
+#[test]
+fn mode_append_to_existing_line() {
+    let tmp = TempDir::new().unwrap();
+    ccs(&tmp)
+        .args(["mode", "append", "--line", "1", "hit_rate"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("line 1"));
+}
+
+#[test]
+fn mode_append_multi_segments_same_line() {
+    let tmp = TempDir::new().unwrap();
+    ccs(&tmp)
+        .args(["mode", "append", "hit_rate", "burn", "cost_today"])
+        .assert()
+        .success();
+
+    let assert = ccs(&tmp).args(["mode", "list"]).assert().success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).to_string();
+    assert!(
+        stdout.contains("{hit_rate} {burn} {cost_today}"),
+        "got: {}",
+        stdout
+    );
+}
+
+#[test]
+fn mode_append_warns_on_unknown() {
+    let tmp = TempDir::new().unwrap();
+    ccs(&tmp)
+        .args(["mode", "append", "no_such_segment"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("unknown segment"));
+}
+
+#[test]
+fn mode_append_rejects_invalid_line_index() {
+    let tmp = TempDir::new().unwrap();
+    ccs(&tmp)
+        .args(["mode", "append", "--line", "99", "ctx"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("out of range"));
+}
+
+#[test]
+fn mode_edit_replays_lines_from_editor() {
+    let tmp = TempDir::new().unwrap();
+    // Fake editor: append two lines so we can verify `edit` parses them.
+    let fake = tmp.path().join("fake-editor.sh");
+    std::fs::write(
+        &fake,
+        "#!/bin/sh\necho '{cost_today}' >> \"$1\"\necho '{cost_session}' >> \"$1\"\n",
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    let mut perm = std::fs::metadata(&fake).unwrap().permissions();
+    perm.set_mode(0o755);
+    std::fs::set_permissions(&fake, perm).unwrap();
+
+    ccs(&tmp)
+        .env("EDITOR", &fake)
+        .args(["mode", "edit", "compact"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("updated"));
+
+    let assert = ccs(&tmp).args(["mode", "list"]).assert().success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).to_string();
+    assert!(stdout.contains("{cost_today}"), "got: {}", stdout);
+    assert!(stdout.contains("{cost_session}"), "got: {}", stdout);
+}
+
+#[test]
+fn presets_are_present_after_init() {
+    let tmp = TempDir::new().unwrap();
+    let assert = ccs(&tmp).args(["mode", "list"]).assert().success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).to_string();
+    for preset in &[
+        "compact", "minimal", "detailed", "cost", "tokens", "tools", "debug",
+    ] {
+        assert!(
+            stdout.contains(preset),
+            "preset {} missing from `mode list`: {}",
+            preset,
+            stdout
+        );
+    }
+}
+
+#[test]
 fn config_path_prints_resolvable_path() {
     let tmp = TempDir::new().unwrap();
     let assert = ccs(&tmp).arg("config-path").assert().success();

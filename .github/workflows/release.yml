@@ -38,10 +38,14 @@ jobs:
             npm_platform: linux-arm64
             bin: ccs
             use_cross: true
-          - target: x86_64-pc-windows-msvc
-            os: windows-2022
-            npm_platform: win32-x64
-            bin: ccs.exe
+          # Windows is temporarily disabled — the rollup module's
+          # mtime+len-based file_id heuristic doesn't reliably detect
+          # appended bytes on Windows-hosted runners. Re-enable once
+          # the Windows path uses a more robust signal.
+          # - target: x86_64-pc-windows-msvc
+          #   os: windows-2022
+          #   npm_platform: win32-x64
+          #   bin: ccs.exe
 
     steps:
       - uses: actions/checkout@v4
@@ -184,7 +188,8 @@ jobs:
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
           set -euo pipefail
-          for plat in darwin-arm64 linux-x64 linux-arm64 win32-x64; do
+          # win32-x64 temporarily skipped (see build matrix above).
+          for plat in darwin-arm64 linux-x64 linux-arm64; do
             pkg_dir="npm/platforms/${plat}"
             mkdir -p "${pkg_dir}/bin"
             if [ "$plat" = "win32-x64" ]; then
@@ -227,7 +232,7 @@ jobs:
         # a fire-and-forget courtesy ping; failures must not break the run.
         run: |
           set +e
-          for pkg in cli darwin-arm64 linux-x64 linux-arm64 win32-x64; do
+          for pkg in cli darwin-arm64 linux-x64 linux-arm64; do
             url="https://registry.npmmirror.com/-/package/@cc-status-line/${pkg}/syncs"
             resp=$(curl -sX PUT --max-time 10 "$url")
             echo "  @cc-status-line/${pkg}: ${resp}"
