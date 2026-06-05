@@ -65,6 +65,31 @@ pub const SEGMENTS: &[SegmentInfo] = &[
         description: "MCP-server calls (aggregated by server name)",
     },
     SegmentInfo {
+        name: "cost_last",
+        example: "last $0.012",
+        description: "Cost of the last assistant turn (USD, current model)",
+    },
+    SegmentInfo {
+        name: "cost_session",
+        example: "sess $1.42",
+        description: "Cumulative cost of the current session",
+    },
+    SegmentInfo {
+        name: "cost_today",
+        example: "today $4.18",
+        description: "Cost across all sessions today (UTC), all models",
+    },
+    SegmentInfo {
+        name: "cost_week",
+        example: "7d $24.50",
+        description: "Cost over the last 7 days, all models",
+    },
+    SegmentInfo {
+        name: "cost",
+        example: "last $0.012 · today $4.18",
+        description: "Combo: cost_last + cost_today",
+    },
+    SegmentInfo {
         name: "mode",
         example: "[detailed]",
         description: "Current mode label (dim)",

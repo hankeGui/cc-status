@@ -2,7 +2,10 @@ use anyhow::{Context, Result};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::path::PathBuf;
+
+use crate::pricing::ModelPrice;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Config {
@@ -14,6 +17,11 @@ pub struct Config {
     pub theme: Theme,
     #[serde(default)]
     pub segments: SegmentSettings,
+    /// Per-model price overrides. Key = model id substring (e.g.
+    /// `"opus"` or `"anthropic--claude-opus-latest"`); value =
+    /// $/1M-tokens. Substrings match case-insensitively.
+    #[serde(default)]
+    pub pricing: HashMap<String, ModelPrice>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -110,6 +118,7 @@ impl Default for Config {
             modes,
             theme: Theme::default(),
             segments: SegmentSettings::default(),
+            pricing: HashMap::new(),
         }
     }
 }

@@ -1,4 +1,4 @@
-use crate::{cache, config, segments, transcript};
+use crate::{cache, config, rollup, segments, transcript};
 use anyhow::Result;
 use serde_json::Value;
 use std::io::Read;
@@ -37,10 +37,26 @@ pub fn run() -> Result<()> {
         return Ok(());
     };
 
+    // Only do the cross-session rollup scan if a cost_today / cost_week
+    // / cost segment is actually referenced by the active mode. The
+    // scan is incremental but still touches every transcript file.
+    let needs_rollup = mode.lines.iter().any(|line| {
+        line.contains("{cost_today}") || line.contains("{cost_week}") || line.contains("{cost}")
+    });
+    let rollup_data = if needs_rollup {
+        let mut r = rollup::load();
+        rollup::refresh(&mut r);
+        let _ = rollup::save(&r);
+        Some(r)
+    } else {
+        None
+    };
+
     let ctx = segments::Ctx {
         stdin: &stdin,
         cache: &sess,
         cfg: &cfg,
+        rollup: rollup_data.as_ref(),
     };
 
     let lines: Vec<String> = mode

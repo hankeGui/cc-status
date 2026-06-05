@@ -39,6 +39,15 @@ pub fn run() -> anyhow::Result<()> {
   {DIM}skills: jira×3 wiki×1{R}  Skill tool calls (top 4, sorted by count)
   {DIM}mcp: github×2{R}         MCP-server calls (aggregated by server name)
 
+{B}Cost segments (opt-in){R}
+  {DIM}last $0.012{R}           {{cost_last}}     last assistant turn (current session, current model)
+  {DIM}sess $1.42{R}            {{cost_session}}  cumulative for the current session
+  {DIM}today $4.18{R}           {{cost_today}}    every session today (UTC), all models
+  {DIM}7d $24.50{R}             {{cost_week}}     last 7 days, all models
+  {DIM}last $0.012 · today $4.18{R}  {{cost}}     compact combo (cost_last + cost_today)
+  Built-in prices follow Anthropic's published per-million-token rates;
+  override per-model in `[pricing]` of config.toml when needed.
+
 {B}Color meanings{R}
   {C}bold cyan{R}    path
   {M}bold magenta{R} git branch

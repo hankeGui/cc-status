@@ -2,7 +2,7 @@
 //! current session. Reads the same JSON-on-stdin payload that Claude Code
 //! sends to `ccs render`.
 
-use crate::{cache, config, transcript};
+use crate::{cache, config, pricing, rollup, transcript};
 use anyhow::Result;
 use chrono::Utc;
 use serde_json::Value;
@@ -279,6 +279,82 @@ pub fn run() -> Result<()> {
         } else {
             println!("│   MCP       {}", fmt_counts_inline(&sess.mcp_counts));
         }
+    }
+
+    // --- cost ---
+    println!("{B}│ Cost (USD){R}", B = BOLD, R = RESET);
+    // Concatenate id + display_name so a 1m suffix on either reaches lookup().
+    let id_str = stdin
+        .pointer("/model/id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let display_str = stdin
+        .pointer("/model/display_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let model_id = if !id_str.is_empty() {
+        id_str
+    } else {
+        display_str
+    };
+    let lookup_key = format!("{} {}", id_str, display_str);
+    let session_price = pricing::lookup(&lookup_key, &cfg.pricing);
+
+    if let Some(price) = session_price {
+        let last_usd = pricing::cost(
+            price,
+            sess.last_turn_input,
+            sess.last_turn_output,
+            sess.last_turn_cache_read,
+            sess.last_turn_cache_creation,
+        );
+        let sess_usd = pricing::cost(
+            price,
+            sess.total_input,
+            sess.total_output,
+            sess.total_cache_read,
+            sess.total_cache_creation,
+        );
+        println!(
+            "│   model        {}  (input ${:.2}/M, output ${:.2}/M)",
+            if model_id.is_empty() {
+                "(unknown)"
+            } else {
+                model_id
+            },
+            price.input,
+            price.output
+        );
+        println!("│   last turn    {}", pricing::fmt_usd(last_usd));
+        println!("│   session      {}", pricing::fmt_usd(sess_usd));
+    } else if !model_id.is_empty() {
+        println!(
+            "│   {}no price for `{}` — set `[pricing.\"{}\"]` in config.toml{}",
+            DIM, model_id, model_id, RESET
+        );
+    } else {
+        println!("│   {}model unknown — costs unavailable{}", DIM, RESET);
+    }
+
+    // today / 7d come from the cross-session rollup
+    let mut r = rollup::load();
+    rollup::refresh(&mut r);
+    let _ = rollup::save(&r);
+    let usd = |days: i64| -> f64 {
+        let mut total = 0.0;
+        for (model, b) in rollup::sum_last_days(&r, days) {
+            let Some(p) = pricing::lookup(&model, &cfg.pricing) else {
+                continue;
+            };
+            total += pricing::cost(p, b.input, b.output, b.cache_read, b.cache_creation);
+        }
+        total
+    };
+    let today = usd(1);
+    let week = usd(7);
+    if today > 0.0 || week > 0.0 {
+        println!("│   today        {}", pricing::fmt_usd(today));
+        println!("│   last 7 days  {}", pricing::fmt_usd(week));
     }
 
     println!("{B}└─{R}", B = BOLD, R = RESET);

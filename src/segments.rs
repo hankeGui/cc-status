@@ -1,5 +1,7 @@
 use crate::cache::SessionCache;
 use crate::config::Config;
+use crate::pricing;
+use crate::rollup::Rollup;
 use chrono::Utc;
 use serde_json::Value;
 use std::path::Path;
@@ -17,6 +19,9 @@ pub struct Ctx<'a> {
     pub stdin: &'a Value,
     pub cache: &'a SessionCache,
     pub cfg: &'a Config,
+    /// Optional rollup of cross-session token totals. None when
+    /// no cost segment is referenced (avoids the scan cost).
+    pub rollup: Option<&'a Rollup>,
 }
 
 pub fn render(name: &str, ctx: &Ctx) -> String {
@@ -32,6 +37,11 @@ pub fn render(name: &str, ctx: &Ctx) -> String {
         "mcp" => seg_mcp(ctx),
         "burn" => seg_burn(ctx),
         "hit_rate" => seg_hit_rate(ctx),
+        "cost_last" => seg_cost_last(ctx),
+        "cost_session" => seg_cost_session(ctx),
+        "cost_today" => seg_cost_today(ctx),
+        "cost_week" => seg_cost_week(ctx),
+        "cost" => seg_cost_combo(ctx),
         "mode" => format!("{}[{}]{}", DIM, ctx.cfg.current_mode, RESET),
         other => format!("{{{}}}", other),
     }
@@ -399,7 +409,12 @@ mod tests {
         cache: &'a SessionCache,
         cfg: &'a Config,
     ) -> Ctx<'a> {
-        Ctx { stdin, cache, cfg }
+        Ctx {
+            stdin,
+            cache,
+            cfg,
+            rollup: None,
+        }
     }
 
     #[test]
@@ -498,5 +513,123 @@ mod tests {
         let cfg = Config::default();
         let ctx = ctx_for_test(&stdin, &cache, &cfg);
         assert_eq!(render("nope", &ctx), "{nope}");
+    }
+}
+
+// --- Cost segments --------------------------------------------------
+
+fn current_model_id(ctx: &Ctx) -> Option<String> {
+    // Concat id + display_name so a "[1m]" or "(1m)" suffix on either
+    // reaches pricing::lookup's tier detector.
+    let id = ctx
+        .stdin
+        .pointer("/model/id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let display = ctx
+        .stdin
+        .pointer("/model/display_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if id.is_empty() && display.is_empty() {
+        None
+    } else {
+        Some(format!("{} {}", id, display).trim().to_string())
+    }
+}
+
+fn seg_cost_last(ctx: &Ctx) -> String {
+    let Some(model) = current_model_id(ctx) else {
+        return String::new();
+    };
+    let Some(price) = pricing::lookup(&model, &ctx.cfg.pricing) else {
+        return String::new();
+    };
+    let c = ctx.cache;
+    let total = c.last_turn_input
+        + c.last_turn_output
+        + c.last_turn_cache_read
+        + c.last_turn_cache_creation;
+    if total == 0 {
+        return String::new();
+    }
+    let usd = pricing::cost(
+        price,
+        c.last_turn_input,
+        c.last_turn_output,
+        c.last_turn_cache_read,
+        c.last_turn_cache_creation,
+    );
+    format!("{}last {}{}", DIM, pricing::fmt_usd(usd), RESET)
+}
+
+fn seg_cost_session(ctx: &Ctx) -> String {
+    let Some(model) = current_model_id(ctx) else {
+        return String::new();
+    };
+    let Some(price) = pricing::lookup(&model, &ctx.cfg.pricing) else {
+        return String::new();
+    };
+    let c = ctx.cache;
+    let total = c.total_input + c.total_output + c.total_cache_read + c.total_cache_creation;
+    if total == 0 {
+        return String::new();
+    }
+    let usd = pricing::cost(
+        price,
+        c.total_input,
+        c.total_output,
+        c.total_cache_read,
+        c.total_cache_creation,
+    );
+    format!("{}sess {}{}", DIM, pricing::fmt_usd(usd), RESET)
+}
+
+fn rollup_cost(ctx: &Ctx, days: i64) -> Option<f64> {
+    let r = ctx.rollup?;
+    let totals = crate::rollup::sum_last_days(r, days);
+    if totals.is_empty() {
+        return None;
+    }
+    let mut usd = 0.0;
+    for (model, b) in totals {
+        let Some(price) = pricing::lookup(&model, &ctx.cfg.pricing) else {
+            continue;
+        };
+        usd += pricing::cost(price, b.input, b.output, b.cache_read, b.cache_creation);
+    }
+    Some(usd)
+}
+
+fn seg_cost_today(ctx: &Ctx) -> String {
+    let Some(usd) = rollup_cost(ctx, 1) else {
+        return String::new();
+    };
+    if usd <= 0.0 {
+        return String::new();
+    }
+    format!("{}today {}{}", DIM, pricing::fmt_usd(usd), RESET)
+}
+
+fn seg_cost_week(ctx: &Ctx) -> String {
+    let Some(usd) = rollup_cost(ctx, 7) else {
+        return String::new();
+    };
+    if usd <= 0.0 {
+        return String::new();
+    }
+    format!("{}7d {}{}", DIM, pricing::fmt_usd(usd), RESET)
+}
+
+fn seg_cost_combo(ctx: &Ctx) -> String {
+    // last + today, useful as a single-glance "how much have I spent"
+    // pair. Drops parts that don't have data.
+    let last = seg_cost_last(ctx);
+    let today = seg_cost_today(ctx);
+    match (last.is_empty(), today.is_empty()) {
+        (true, true) => String::new(),
+        (false, true) => last,
+        (true, false) => today,
+        (false, false) => format!("{} · {}", last, today),
     }
 }

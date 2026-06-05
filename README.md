@@ -181,6 +181,11 @@ Prints a colored cheat-sheet of every segment, every color, every glyph.
 | `{burn}` | `🔥 32.4k/min` | Session-average token rate |
 | `{skills}` | `skills: jira×3 wiki×1` | Skill calls, top 4 by count |
 | `{mcp}` | `mcp: github×2` | MCP-server calls, top 4 |
+| `{cost_last}` | `last $0.012` | USD cost of the last turn (current model price) |
+| `{cost_session}` | `sess $1.42` | Cumulative USD cost for the current session |
+| `{cost_today}` | `today $4.18` | USD cost across all sessions today |
+| `{cost_week}` | `7d $24.50` | USD cost over the last 7 days |
+| `{cost}` | `last $0.012 · today $4.18` | Combo: `cost_last + cost_today` |
 | `{mode}` | `[detailed]` | Current mode label |
 
 ## Configuration
@@ -235,7 +240,36 @@ Two relevant Claude Code env vars (set in `~/.claude/settings.json` `env` block)
 
 cc-status reads `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` from the process env at render time, so the bar always matches Claude Code's actual compact behavior.
 
-## Performance
+## Pricing & cost segments
+
+The `cost*` segments compute USD by multiplying per-model token counts
+against built-in Anthropic prices (Opus, Sonnet, Haiku, with the 1M
+context tier doubling input/output when the model name contains
+`[1m]` / `(1m)`). Override or extend the table in your config:
+
+```toml
+[pricing.opus]
+input  = 12.00     # $/M tokens
+output = 60.00
+
+# Or pin an exact model id (substring match, case-insensitive)
+[pricing."anthropic--claude-opus-latest"]
+input  = 13.00
+output = 65.00
+```
+
+`{cost_today}` and `{cost_week}` walk every transcript under
+`~/.claude/projects/`, incrementally folded into a rollup at
+`$XDG_CACHE_HOME/cc-status/rollup.json`. First scan touches every
+file; subsequent renders only read newly-appended bytes.
+
+> **Caveat**: today/7d cost relies on the model id Claude Code writes
+> into the transcript (`message.model`), which is the canonical id
+> like `claude-opus-4-7` without the `[1m]` suffix. If you run on a
+> 1M-context tier, today/7d under-counts by ~50% unless you add a
+> matching `[pricing.opus]` override that bakes the doubled price in.
+
+
 
 - **Render latency**: ~20 ms (mostly forking `git` for status). Well under Claude Code's 300 ms status-line timeout.
 - **Transcript parsing**: incremental — a per-session JSON cache stores the file offset and aggregated counters. Parsing 1 GB of transcript on the first run is the worst case; every subsequent render reads only newly-appended bytes.

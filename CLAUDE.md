@@ -83,6 +83,30 @@ The relevant env vars (read at render time, not start-up):
 
 `CLAUDE_CODE_AUTO_COMPACT_WINDOW` affects what CC sends in `remaining_percentage`, so we observe its effect indirectly through the backsolve. Don't read it ourselves — that would double-count.
 
+## Pricing / cost segments
+
+`pricing.rs` owns the per-model rate table and the cost formula. Keep
+the formula symmetric with `cache_creation = 1.25× input` and
+`cache_read = 0.1× input` — those are Anthropic API constants, not
+ours to tune. The 1M-context tier doubles input/output when the model
+name contains `[1m]` or `(1m)` (substring match).
+
+`rollup.rs` walks every transcript under `~/.claude/projects/` and
+folds new lines into `$XDG_CACHE_HOME/cc-status/rollup.json`, keyed
+by (UTC day, model id). Known limitation: the `message.model` field
+in CC transcripts is the canonical id (`claude-opus-4-7`) without
+the `[1m]` suffix, so `cost_today` / `cost_week` under-count when a
+user is on the high tier. Today, the recommended workaround is a
+user-side `[pricing.opus]` override; a future fix could attribute
+the tier from `stdin.model.display_name` at render time and persist
+it into the rollup, but that requires schema-bumping the rollup file.
+
+The rollup is loaded only when the active mode references
+`{cost_today}`, `{cost_week}`, or `{cost}` — pure session-local
+costs (`cost_last`, `cost_session`) skip the scan entirely. Don't
+unconditionally load the rollup in `render::run`; that breaks the
+fast path for users who don't care about cross-session costs.
+
 ## Release flow
 
 ```sh

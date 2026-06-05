@@ -286,6 +286,11 @@ lines = [
 | `{burn}` | `🔥 32.4k/min` | 会话平均 token 速率 |
 | `{skills}` | `skills: jira×3 wiki×1` | Skill 调用次数（按次数倒序，最多 4 个） |
 | `{mcp}` | `mcp: github×2` | MCP 服务器调用次数 |
+| `{cost_last}` | `last $0.012` | 上一轮花了多少美元（按当前模型价格） |
+| `{cost_session}` | `sess $1.42` | 整个当前会话累计成本（USD）|
+| `{cost_today}` | `today $4.18` | 今天（UTC 日）所有会话累计成本 |
+| `{cost_week}` | `7d $24.50` | 最近 7 天累计成本 |
+| `{cost}` | `last $0.012 · today $4.18` | `cost_last + cost_today` 的组合 |
 | `{mode}` | `[detailed]` | 当前模式名 |
 
 ### 颜色约定
