@@ -8,16 +8,83 @@ cc-status 是给 [Claude Code](https://docs.claude.com/en/docs/claude-code) 用�
 
 ## 1. 安装与接入
 
-### 1.1 编译安装
+> **重要：`npx` 是"试用"，不是"安装"**。`npx` 跑完命令就走，不会把 `ccs` 留在你的 PATH 里。Claude Code 的状态栏每次刷新都要执行 `ccs render`，所以你需要**长期可用**的安装方式 —— 用 `npm install -g`、`curl`、或 Homebrew，**不要**靠 npx。
+
+### 1.1 npm 全局安装（推荐，最快）
+
+只要你有 Node.js（用 Claude Code 就有）：
+
+```sh
+npm install -g @cc-status-line/cli
+ccs --version
+```
+
+如果默认 npm registry 慢（淘宝镜像同步可能滞后），加 `--registry`：
+
+```sh
+npm install -g --registry=https://registry.npmmirror.com @cc-status-line/cli
+```
+
+或者切到官方：
+
+```sh
+npm install -g --registry=https://registry.npmjs.org @cc-status-line/cli
+```
+
+如果只是**想试一下**（不长期装），用 npx：
+
+```sh
+npx -y @cc-status-line/cli --version
+```
+
+但试完 `ccs` 就**不在 PATH 了**，要用 Claude Code 的状态栏还是得走上面的 `-g` 安装。
+
+### 1.2 curl 安装脚本
+
+不想装 npm 包，直接拉 GitHub Release tarball：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/hankeGui/cc-status/main/install.sh | sh
+```
+
+装到 `~/.local/bin/ccs`。用 `--bin-dir` 自定义路径、`--version` 装指定版本。
+
+### 1.3 Homebrew
+
+```sh
+brew install hankeGui/tap/ccs
+```
+
+### 1.4 手动下载
+
+从 [Releases](https://github.com/hankeGui/cc-status/releases) 选对应平台的 tarball，解压，把 `ccs` 放到 PATH 上任意目录。
+
+### 1.5 从源码编译
+
+需要 Rust 工具链。
+
+```sh
+cargo install --git https://github.com/hankeGui/cc-status --locked
+```
+
+> **注意**：`cargo install` 把二进制放在 `~/.cargo/bin/ccs`。如果你的 PATH 里没有 `~/.cargo/bin`（rustup 安装时通常会加，但有些手动配置的 shell 没加），加上：
+>
+> ```sh
+> export PATH="$HOME/.cargo/bin:$PATH"
+> ```
+>
+> 即使 PATH 没加，`ccs setup` 也会写绝对路径到 settings.json，所以 Claude Code 仍能找到。
+
+或者克隆仓库自己 build：
 
 ```sh
 git clone https://github.com/hankeGui/cc-status
 cd cc-status
 cargo build --release
-cp target/release/ccs ~/.local/bin/        # 或任何在 PATH 里的目录
+cp target/release/ccs ~/.local/bin/
 ```
 
-### 1.2 接到 Claude Code
+### 1.6 接到 Claude Code
 
 **推荐：用 `ccs setup` 自动配置**
 

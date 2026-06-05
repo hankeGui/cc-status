@@ -26,55 +26,68 @@ cc-status answers all of these in three lines and lets you switch modes with a s
 
 ## Install
 
-Pick the easiest path for your machine:
+cc-status is a Rust binary, but you don't need a Rust toolchain — pick whichever channel suits your machine.
 
-### npm / npx (recommended for Claude Code users)
+> **Heads-up: `npx` is for trying it once. Don't use `npx` to install — Claude Code's `statusLine` runs on every prompt refresh, so you want the binary on PATH.** Use `npm install -g`, `curl`, or Homebrew below.
 
-You already have Node.js if you use Claude Code:
+### npm (recommended for Claude Code users)
+
+You already have Node.js if you use Claude Code.
 
 ```sh
-# One-shot, no install
-npx -y @cc-status-line/cli --version
-
-# Or install globally so the binary is on PATH
 npm install -g @cc-status-line/cli
 ccs --version
+ccs setup           # writes the statusLine block into ~/.claude/settings.json (with backup)
 ```
 
-Then in `~/.claude/settings.json`:
-
-```json
-{
-  "statusLine": {
-    "type": "command",
-    "command": "ccs render"
-  }
-}
-```
-
-### Homebrew (macOS / Linux)
+In China? Use a faster mirror once:
 
 ```sh
-brew install hankeGui/tap/ccs
+npm install -g --registry=https://registry.npmmirror.com @cc-status-line/cli
+ccs setup
 ```
+
+To **try it without installing** (binary won't stay on PATH afterwards):
+
+```sh
+npx -y @cc-status-line/cli --version
+```
+
+This is fine for kicking the tires, but for actual Claude Code use you want the global install above.
 
 ### curl install script
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/hankeGui/cc-status/main/install.sh | sh
+ccs setup
 ```
 
 Installs to `~/.local/bin/ccs`. Pass `--bin-dir` or `--version` to customize.
 
+### Homebrew (macOS / Linux)
+
+```sh
+brew install hankeGui/tap/ccs
+ccs setup
+```
+
 ### Manual download
 
-Pick a tarball from [releases](https://github.com/hankeGui/cc-status/releases), unpack, drop `ccs` somewhere on PATH.
+Pick a tarball from [releases](https://github.com/hankeGui/cc-status/releases), unpack, drop `ccs` somewhere on PATH. Then `ccs setup`.
 
-### From source (requires Rust)
+### From source (requires a Rust toolchain)
 
 ```sh
 cargo install --git https://github.com/hankeGui/cc-status --locked
 ```
+
+> **Note**: `cargo install` puts the binary at `~/.cargo/bin/ccs`. If `~/.cargo/bin` is not on your PATH, add it (rustup's installer normally does this for you):
+>
+> ```sh
+> export PATH="$HOME/.cargo/bin:$PATH"
+> ```
+>
+> `ccs setup` writes an absolute path either way, so Claude Code finds it even if your shell doesn't.
 
 Or clone and build:
 
@@ -85,17 +98,15 @@ cargo build --release
 cp target/release/ccs ~/.local/bin/
 ```
 
-After installing, hook it into Claude Code:
+## After installing — wire it into Claude Code
 
 ```sh
 ccs setup
 ```
 
-This inspects `~/.claude/settings.json`, shows the proposed `statusLine`
-change, asks for confirmation, and writes a backup before saving. Pass
-`--yes` to skip the prompt or `--check` to inspect without modifying.
+This inspects `~/.claude/settings.json`, shows the proposed `statusLine` change, prompts y/N, and writes a backup before saving. Pass `--yes` to skip the prompt or `--check` to inspect without modifying. To remove the line later: `ccs setup --uninstall`.
 
-Or do it manually — add this to `~/.claude/settings.json`:
+If you'd rather edit by hand:
 
 ```json
 {
@@ -107,6 +118,8 @@ Or do it manually — add this to `~/.claude/settings.json`:
 ```
 
 Use absolute paths — Claude Code's status-line shell does not always inherit your login `PATH`.
+
+Restart Claude Code and the bar appears at the top of every prompt.
 
 ## Three ways to interact
 
