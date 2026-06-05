@@ -25,10 +25,10 @@ jobs:
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      # Note: this requires Pages to be enabled in repo Settings first
+      # (Source = GitHub Actions). The enablement: true option needs
+      # a PAT to work; with the default GITHUB_TOKEN it 403s.
       - uses: actions/configure-pages@v5
-        with:
-          # Enable Pages on first run if it isn't already.
-          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: docs/site
