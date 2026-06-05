@@ -29,6 +29,20 @@ pub struct SessionCache {
     pub first_turn_ms: Option<i64>,
     #[serde(default)]
     pub last_turn_ms: Option<i64>,
+    /// Per-message dedupe (key = "message_id|requestId"). Value is the
+    /// largest token totals we've credited so far. Mirrors ccusage's
+    /// streaming-partial → streaming-final replacement strategy so we
+    /// don't double-count the same assistant message.
+    #[serde(default)]
+    pub seen: HashMap<String, SeenMessage>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default, Clone)]
+pub struct SeenMessage {
+    pub input: u64,
+    pub output: u64,
+    pub cache_read: u64,
+    pub cache_creation: u64,
 }
 
 fn cache_dir() -> Result<PathBuf> {

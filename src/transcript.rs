@@ -132,15 +132,65 @@ fn process_entry(v: &Value, cache: &mut SessionCache) {
                 .unwrap_or(0);
 
             if input + output + cache_read + cache_creation > 0 {
+                // Dedupe: same message.id can appear multiple times
+                // (streaming partial / final). We keep totals for the
+                // largest version, mirroring ccusage's behavior.
+                let dedupe_key = v
+                    .pointer("/message/id")
+                    .and_then(|x| x.as_str())
+                    .map(|mid| {
+                        let req = v
+                            .get("requestId")
+                            .or_else(|| v.get("request_id"))
+                            .and_then(|x| x.as_str())
+                            .unwrap_or("");
+                        format!("{}|{}", mid, req)
+                    });
+
+                let mut credited_input = input;
+                let mut credited_output = output;
+                let mut credited_cache_read = cache_read;
+                let mut credited_cache_creation = cache_creation;
+
+                if let Some(key) = &dedupe_key {
+                    let new_total = input + output + cache_read + cache_creation;
+                    if let Some(prev) = cache.seen.get(key) {
+                        let prev_total =
+                            prev.input + prev.output + prev.cache_read + prev.cache_creation;
+                        if new_total <= prev_total {
+                            // skip this duplicate (existing is at least as complete)
+                            return;
+                        }
+                        // upgrade: subtract old, add new
+                        credited_input = input.saturating_sub(prev.input);
+                        credited_output = output.saturating_sub(prev.output);
+                        credited_cache_read = cache_read.saturating_sub(prev.cache_read);
+                        credited_cache_creation =
+                            cache_creation.saturating_sub(prev.cache_creation);
+                    }
+                }
+
                 cache.last_turn_input = input;
                 cache.last_turn_output = output;
                 cache.last_turn_cache_read = cache_read;
                 cache.last_turn_cache_creation = cache_creation;
 
-                cache.total_input += input;
-                cache.total_output += output;
-                cache.total_cache_read += cache_read;
-                cache.total_cache_creation += cache_creation;
+                cache.total_input += credited_input;
+                cache.total_output += credited_output;
+                cache.total_cache_read += credited_cache_read;
+                cache.total_cache_creation += credited_cache_creation;
+
+                if let Some(key) = dedupe_key {
+                    cache.seen.insert(
+                        key,
+                        crate::cache::SeenMessage {
+                            input,
+                            output,
+                            cache_read,
+                            cache_creation,
+                        },
+                    );
+                }
 
                 if let Some(ts) = v.get("timestamp").and_then(|x| x.as_str()) {
                     if let Ok(dt) = DateTime::parse_from_rfc3339(ts) {

@@ -2,7 +2,7 @@
 
 use crate::{config, pricing, rollup};
 use anyhow::Result;
-use chrono::{Datelike, Utc};
+use chrono::{Datelike, Local};
 use std::collections::HashMap;
 
 const RESET: &str = "\x1b[0m";
@@ -37,7 +37,7 @@ pub fn run(args: Args) -> Result<()> {
 
     // --- per-day breakdown -------------------------------------------------
     let mut day_totals: Vec<(String, f64, HashMap<String, f64>)> = Vec::new();
-    let today = Utc::now();
+    let today = Local::now();
     for offset in (0..days as i64).rev() {
         let d = today - chrono::Duration::days(offset);
         let key = format!("{:04}-{:02}-{:02}", d.year(), d.month(), d.day());

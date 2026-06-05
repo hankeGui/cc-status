@@ -7,7 +7,7 @@
 //! per session.
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, Datelike, Utc};
+use chrono::{DateTime, Datelike, Local};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -43,6 +43,23 @@ pub struct Rollup {
     /// Absolute jsonl path → state.
     #[serde(default)]
     pub files: HashMap<String, FileState>,
+    /// Per-message dedupe map. Key = (message.id + "|" + requestId).
+    /// Value = (day, model, token totals already credited to that bucket).
+    /// When the same message reappears (streaming partial → final),
+    /// we replace the credited totals so we don't double-count, mirroring
+    /// ccusage's `should_replace_deduped_entry` logic.
+    #[serde(default)]
+    pub seen: HashMap<String, SeenEntry>,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct SeenEntry {
+    pub day: String,
+    pub model: String,
+    pub input: u64,
+    pub output: u64,
+    pub cache_read: u64,
+    pub cache_creation: u64,
 }
 
 fn rollup_path() -> Result<PathBuf> {
@@ -212,23 +229,82 @@ fn process_entry(v: &Value, state: &mut FileState, r: &mut Rollup) {
         .get("timestamp")
         .and_then(|x| x.as_str())
         .and_then(|ts| DateTime::parse_from_rfc3339(ts).ok())
-        .map(|dt| dt.with_timezone(&Utc).format("%Y-%m-%d").to_string())
+        .map(|dt| dt.with_timezone(&Local).format("%Y-%m-%d").to_string())
         .unwrap_or_else(|| {
-            let now = Utc::now();
+            let now = Local::now();
             format!("{:04}-{:02}-{:02}", now.year(), now.month(), now.day())
         });
 
     let model = state.last_model.clone().unwrap_or_else(|| "unknown".into());
-    let bucket = r.by_day.entry(day).or_default().entry(model).or_default();
+
+    // Dedupe key: (message.id + requestId). When CC streams a turn, the
+    // same message.id can appear multiple times in the JSONL (partial /
+    // final / sidechain replay). ccusage handles this by keeping the
+    // copy with the largest token total. Mirror that.
+    let dedupe_key = v
+        .pointer("/message/id")
+        .and_then(|x| x.as_str())
+        .map(|mid| {
+            let req = v
+                .get("requestId")
+                .or_else(|| v.get("request_id"))
+                .and_then(|x| x.as_str())
+                .unwrap_or("");
+            format!("{}|{}", mid, req)
+        });
+
+    let new_total = input + output + cache_read + cache_creation;
+
+    if let Some(key) = &dedupe_key {
+        if let Some(prev) = r.seen.get(key).cloned() {
+            let prev_total = prev.input + prev.output + prev.cache_read + prev.cache_creation;
+            if new_total <= prev_total {
+                // Existing entry is at least as complete — drop this one.
+                return;
+            }
+            // New entry has more tokens (streaming finalized after a
+            // partial). Subtract the old contribution before adding the
+            // new one, so the running totals reflect the larger version.
+            if let Some(by_model) = r.by_day.get_mut(&prev.day) {
+                if let Some(b) = by_model.get_mut(&prev.model) {
+                    b.input = b.input.saturating_sub(prev.input);
+                    b.output = b.output.saturating_sub(prev.output);
+                    b.cache_read = b.cache_read.saturating_sub(prev.cache_read);
+                    b.cache_creation = b.cache_creation.saturating_sub(prev.cache_creation);
+                }
+            }
+        }
+    }
+
+    let bucket = r
+        .by_day
+        .entry(day.clone())
+        .or_default()
+        .entry(model.clone())
+        .or_default();
     bucket.input += input;
     bucket.output += output;
     bucket.cache_read += cache_read;
     bucket.cache_creation += cache_creation;
+
+    if let Some(key) = dedupe_key {
+        r.seen.insert(
+            key,
+            SeenEntry {
+                day,
+                model,
+                input,
+                output,
+                cache_read,
+                cache_creation,
+            },
+        );
+    }
 }
 
-/// Sum buckets over the last `days` days (ending today, UTC).
+/// Sum buckets over the last `days` days (ending today, local time).
 pub fn sum_last_days(r: &Rollup, days: i64) -> HashMap<String, DayBucket> {
-    let today = Utc::now();
+    let today = Local::now();
     let mut out: HashMap<String, DayBucket> = HashMap::new();
     for offset in 0..days {
         let d = today - chrono::Duration::days(offset);
