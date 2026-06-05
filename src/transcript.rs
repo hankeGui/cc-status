@@ -67,7 +67,9 @@ pub fn find_latest_for_cwd(cwd: &str) -> Option<PathBuf> {
 /// `message.usage` object with input/output/cache token counts. Tool-use
 /// blocks (`type: "tool_use"`) tell us which Skill/MCP was invoked.
 pub fn update(path: &Path, cache: &mut SessionCache) -> Result<()> {
-    let Ok(meta) = std::fs::metadata(path) else { return Ok(()) };
+    let Ok(meta) = std::fs::metadata(path) else {
+        return Ok(());
+    };
     let inode = file_id(&meta);
     let size = meta.len();
 
@@ -98,7 +100,9 @@ pub fn update(path: &Path, cache: &mut SessionCache) -> Result<()> {
         if line.is_empty() {
             continue;
         }
-        let Ok(v): Result<Value, _> = serde_json::from_str(&line) else { continue };
+        let Ok(v): Result<Value, _> = serde_json::from_str(&line) else {
+            continue;
+        };
         process_entry(&v, cache);
     }
     cache.file_offset += bytes_consumed;
@@ -110,8 +114,14 @@ fn process_entry(v: &Value, cache: &mut SessionCache) {
 
     if entry_type == "assistant" {
         if let Some(usage) = v.pointer("/message/usage") {
-            let input = usage.get("input_tokens").and_then(|x| x.as_u64()).unwrap_or(0);
-            let output = usage.get("output_tokens").and_then(|x| x.as_u64()).unwrap_or(0);
+            let input = usage
+                .get("input_tokens")
+                .and_then(|x| x.as_u64())
+                .unwrap_or(0);
+            let output = usage
+                .get("output_tokens")
+                .and_then(|x| x.as_u64())
+                .unwrap_or(0);
             let cache_read = usage
                 .get("cache_read_input_tokens")
                 .and_then(|x| x.as_u64())
@@ -162,12 +172,169 @@ fn process_entry(v: &Value, cache: &mut SessionCache) {
                         .pointer("/input/skill")
                         .and_then(|x| x.as_str())
                         .unwrap_or("?");
-                    *cache.skill_counts.entry(skill_name.to_string()).or_insert(0) += 1;
+                    *cache
+                        .skill_counts
+                        .entry(skill_name.to_string())
+                        .or_insert(0) += 1;
                 } else if let Some(rest) = name.strip_prefix("mcp__") {
                     let server = rest.split("__").next().unwrap_or(rest);
                     *cache.mcp_counts.entry(server.to_string()).or_insert(0) += 1;
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn write_lines(tmp: &tempfile::TempDir, lines: &[&str]) -> std::path::PathBuf {
+        let path = tmp.path().join("transcript.jsonl");
+        let mut f = std::fs::File::create(&path).unwrap();
+        for line in lines {
+            writeln!(f, "{}", line).unwrap();
+        }
+        path
+    }
+
+    fn append_lines(path: &std::path::Path, lines: &[&str]) {
+        let mut f = std::fs::OpenOptions::new().append(true).open(path).unwrap();
+        for line in lines {
+            writeln!(f, "{}", line).unwrap();
+        }
+    }
+
+    #[test]
+    fn parses_assistant_usage() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_lines(
+            &tmp,
+            &[
+                r#"{"type":"assistant","timestamp":"2026-06-04T10:00:00Z","message":{"usage":{"input_tokens":5,"output_tokens":100,"cache_read_input_tokens":1000,"cache_creation_input_tokens":50}}}"#,
+            ],
+        );
+        let mut cache = SessionCache::default();
+        update(&path, &mut cache).unwrap();
+        assert_eq!(cache.last_turn_input, 5);
+        assert_eq!(cache.last_turn_output, 100);
+        assert_eq!(cache.last_turn_cache_read, 1000);
+        assert_eq!(cache.last_turn_cache_creation, 50);
+        assert_eq!(cache.total_input, 5);
+        assert_eq!(cache.total_output, 100);
+        assert!(cache.first_turn_ms.is_some());
+        assert!(cache.last_cache_read_ms.is_some());
+    }
+
+    #[test]
+    fn accumulates_across_turns() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_lines(
+            &tmp,
+            &[
+                r#"{"type":"assistant","timestamp":"2026-06-04T10:00:00Z","message":{"usage":{"input_tokens":10,"output_tokens":20}}}"#,
+                r#"{"type":"assistant","timestamp":"2026-06-04T10:01:00Z","message":{"usage":{"input_tokens":30,"output_tokens":40}}}"#,
+            ],
+        );
+        let mut cache = SessionCache::default();
+        update(&path, &mut cache).unwrap();
+        assert_eq!(cache.total_input, 40);
+        assert_eq!(cache.total_output, 60);
+        assert_eq!(cache.last_turn_input, 30);
+        assert_eq!(cache.last_turn_output, 40);
+    }
+
+    #[test]
+    fn incremental_only_reads_new_bytes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_lines(
+            &tmp,
+            &[
+                r#"{"type":"assistant","timestamp":"2026-06-04T10:00:00Z","message":{"usage":{"input_tokens":10,"output_tokens":20}}}"#,
+            ],
+        );
+        let mut cache = SessionCache::default();
+        update(&path, &mut cache).unwrap();
+        let after_first = cache.file_offset;
+
+        append_lines(
+            &path,
+            &[
+                r#"{"type":"assistant","timestamp":"2026-06-04T10:01:00Z","message":{"usage":{"input_tokens":5,"output_tokens":7}}}"#,
+            ],
+        );
+        update(&path, &mut cache).unwrap();
+        assert!(cache.file_offset > after_first);
+        assert_eq!(cache.total_input, 15);
+        assert_eq!(cache.total_output, 27);
+    }
+
+    #[test]
+    fn rotation_resets_state() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_lines(
+            &tmp,
+            &[
+                r#"{"type":"assistant","timestamp":"2026-06-04T10:00:00Z","message":{"usage":{"input_tokens":10,"output_tokens":20}}}"#,
+            ],
+        );
+        let mut cache = SessionCache::default();
+        update(&path, &mut cache).unwrap();
+        assert_eq!(cache.total_input, 10);
+
+        std::fs::remove_file(&path).unwrap();
+        let _ = write_lines(
+            &tmp,
+            &[
+                r#"{"type":"assistant","timestamp":"2026-06-04T11:00:00Z","message":{"usage":{"input_tokens":7,"output_tokens":3}}}"#,
+            ],
+        );
+        update(&path, &mut cache).unwrap();
+        assert_eq!(cache.total_input, 7, "totals should reset on rotation");
+        assert_eq!(cache.total_output, 3);
+    }
+
+    #[test]
+    fn counts_skill_and_mcp_tool_uses() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_lines(
+            &tmp,
+            &[
+                r#"{"type":"assistant","message":{"usage":{"input_tokens":1},"content":[{"type":"tool_use","name":"Skill","input":{"skill":"jira"}},{"type":"tool_use","name":"Skill","input":{"skill":"jira"}}]}}"#,
+                r#"{"type":"assistant","message":{"usage":{"input_tokens":1},"content":[{"type":"tool_use","name":"mcp__github__list_issues"},{"type":"tool_use","name":"mcp__github__create_pr"}]}}"#,
+            ],
+        );
+        let mut cache = SessionCache::default();
+        update(&path, &mut cache).unwrap();
+        assert_eq!(cache.skill_counts.get("jira"), Some(&2));
+        assert_eq!(cache.mcp_counts.get("github"), Some(&2));
+    }
+
+    #[test]
+    fn skips_malformed_lines() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_lines(
+            &tmp,
+            &[
+                "not json",
+                r#"{"type":"assistant","message":{"usage":{"input_tokens":3,"output_tokens":4}}}"#,
+                "",
+                "{",
+            ],
+        );
+        let mut cache = SessionCache::default();
+        update(&path, &mut cache).unwrap();
+        assert_eq!(cache.total_input, 3);
+        assert_eq!(cache.total_output, 4);
+    }
+
+    #[test]
+    fn missing_file_is_noop() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("does-not-exist.jsonl");
+        let mut cache = SessionCache::default();
+        update(&path, &mut cache).expect("missing file should not error");
+        assert_eq!(cache.total_input, 0);
     }
 }

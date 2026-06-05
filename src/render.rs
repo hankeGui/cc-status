@@ -37,7 +37,11 @@ pub fn run() -> Result<()> {
         return Ok(());
     };
 
-    let ctx = segments::Ctx { stdin: &stdin, cache: &sess, cfg: &cfg };
+    let ctx = segments::Ctx {
+        stdin: &stdin,
+        cache: &sess,
+        cfg: &cfg,
+    };
 
     let lines: Vec<String> = mode
         .lines

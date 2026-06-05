@@ -1,5 +1,5 @@
 {
-  "name": "cc-status-line",
+  "name": "@cc-status-line/cli",
   "version": "0.0.0",
   "description": "Multi-line, mode-switchable status line for Claude Code (Rust binary, npm-distributed)",
   "keywords": [
@@ -25,10 +25,14 @@
   "files": [
     "bin",
     "index.js",
+    "postinstall.js",
     "README.md"
   ],
   "engines": {
     "node": ">=14"
+  },
+  "scripts": {
+    "postinstall": "node postinstall.js || true"
   },
   "optionalDependencies": {
     "@cc-status-line/darwin-arm64": "0.0.0",

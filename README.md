@@ -34,10 +34,10 @@ You already have Node.js if you use Claude Code:
 
 ```sh
 # One-shot, no install
-npx -y cc-status-line --version
+npx -y @cc-status-line/cli --version
 
 # Or install globally so the binary is on PATH
-npm install -g cc-status-line
+npm install -g @cc-status-line/cli
 ccs --version
 ```
 
@@ -85,7 +85,17 @@ cargo build --release
 cp target/release/ccs ~/.local/bin/
 ```
 
-After installing, point Claude Code at it:
+After installing, hook it into Claude Code:
+
+```sh
+ccs setup
+```
+
+This inspects `~/.claude/settings.json`, shows the proposed `statusLine`
+change, asks for confirmation, and writes a backup before saving. Pass
+`--yes` to skip the prompt or `--check` to inspect without modifying.
+
+Or do it manually — add this to `~/.claude/settings.json`:
 
 ```json
 {

@@ -94,13 +94,20 @@ fn seg_git(ctx: &Ctx) -> String {
     }
 
     // Ahead/behind
-    if let Some(counts) = run_git(cwd, &["rev-list", "--left-right", "--count", "HEAD...@{upstream}"]) {
+    if let Some(counts) = run_git(
+        cwd,
+        &["rev-list", "--left-right", "--count", "HEAD...@{upstream}"],
+    ) {
         let mut it = counts.split_whitespace();
         let ahead: u32 = it.next().unwrap_or("0").parse().unwrap_or(0);
         let behind: u32 = it.next().unwrap_or("0").parse().unwrap_or(0);
         let mut ab = String::new();
-        if ahead > 0 { ab.push_str(&format!("⇡{}", ahead)); }
-        if behind > 0 { ab.push_str(&format!("⇣{}", behind)); }
+        if ahead > 0 {
+            ab.push_str(&format!("⇡{}", ahead));
+        }
+        if behind > 0 {
+            ab.push_str(&format!("⇣{}", behind));
+        }
         if !ab.is_empty() {
             parts.push(format!("{}{}{}", DIM, ab, RESET));
         }
@@ -112,14 +119,24 @@ fn seg_git(ctx: &Ctx) -> String {
         let mut modified = false;
         let mut untracked = false;
         for line in porcelain.lines() {
-            if line.starts_with("??") { untracked = true; }
-            else if line.starts_with(" M") || line.starts_with("M ") { modified = true; }
-            else if line.chars().next().map_or(false, |c| "MARCDU".contains(c)) { staged = true; }
+            if line.starts_with("??") {
+                untracked = true;
+            } else if line.starts_with(" M") || line.starts_with("M ") {
+                modified = true;
+            } else if line.chars().next().map_or(false, |c| "MARCDU".contains(c)) {
+                staged = true;
+            }
         }
         let mut flags = String::new();
-        if staged { flags.push('+'); }
-        if modified { flags.push('!'); }
-        if untracked { flags.push('?'); }
+        if staged {
+            flags.push('+');
+        }
+        if modified {
+            flags.push('!');
+        }
+        if untracked {
+            flags.push('?');
+        }
         if !flags.is_empty() {
             parts.push(format!("{}[{}]{}", RED, flags, RESET));
         }
@@ -139,7 +156,11 @@ fn run_git(cwd: &str, args: &[&str]) -> Option<String> {
         return None;
     }
     let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if s.is_empty() { None } else { Some(s) }
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
 }
 
 fn seg_model(ctx: &Ctx) -> String {
@@ -156,7 +177,9 @@ fn seg_model(ctx: &Ctx) -> String {
 }
 
 fn seg_ctx(ctx: &Ctx) -> String {
-    let Some(c) = compute_ctx(ctx) else { return String::new() };
+    let Some(c) = compute_ctx(ctx) else {
+        return String::new();
+    };
     // remaining_frac = 距离 compact 还剩多少（0..1）
     let remaining_frac = (1.0 - c.used_frac).clamp(0.0, 1.0);
     let pct_i = (remaining_frac * 100.0).round() as i64;
@@ -223,12 +246,24 @@ fn compute_ctx(ctx: &Ctx) -> Option<CtxCalc> {
     let capacity = capacity_f.round().max(1.0) as u64;
     let used_frac = (used as f64 / capacity_f).clamp(0.0, 1.0);
 
-    Some(CtxCalc { used, capacity, used_frac })
+    Some(CtxCalc {
+        used,
+        capacity,
+        used_frac,
+    })
 }
 
 fn seg_ctx_tokens(ctx: &Ctx) -> String {
-    let Some(c) = compute_ctx(ctx) else { return String::new() };
-    format!("{}{}/{}{}", DIM, short_num(c.used), short_num(c.capacity), RESET)
+    let Some(c) = compute_ctx(ctx) else {
+        return String::new();
+    };
+    format!(
+        "{}{}/{}{}",
+        DIM,
+        short_num(c.used),
+        short_num(c.capacity),
+        RESET
+    )
 }
 
 fn progress_bar(frac: f64, width: usize) -> String {
@@ -251,7 +286,10 @@ fn progress_bar(frac: f64, width: usize) -> String {
 
 fn seg_last_turn(ctx: &Ctx) -> String {
     let c = ctx.cache;
-    let total = c.last_turn_input + c.last_turn_output + c.last_turn_cache_read + c.last_turn_cache_creation;
+    let total = c.last_turn_input
+        + c.last_turn_output
+        + c.last_turn_cache_read
+        + c.last_turn_cache_creation;
     if total == 0 {
         return String::new();
     }
@@ -261,7 +299,11 @@ fn seg_last_turn(ctx: &Ctx) -> String {
     } else {
         0
     };
-    let mut s = format!("↑{} ↓{}", short_num(c.last_turn_input + c.last_turn_cache_read + c.last_turn_cache_creation), short_num(c.last_turn_output));
+    let mut s = format!(
+        "↑{} ↓{}",
+        short_num(c.last_turn_input + c.last_turn_cache_read + c.last_turn_cache_creation),
+        short_num(c.last_turn_output)
+    );
     if ctx.cfg.segments.last_turn.show_cache_creation && c.last_turn_cache_creation > 0 {
         s.push_str(&format!(" +{}", short_num(c.last_turn_cache_creation)));
     }
@@ -280,7 +322,9 @@ fn short_num(n: u64) -> String {
 }
 
 fn seg_cache_ttl(ctx: &Ctx) -> String {
-    let Some(ms) = ctx.cache.last_cache_read_ms else { return String::new() };
+    let Some(ms) = ctx.cache.last_cache_read_ms else {
+        return String::new();
+    };
     let now_ms = Utc::now().timestamp_millis();
     let elapsed_s = ((now_ms - ms) / 1000).max(0);
     let ttl_s = 5 * 60;
@@ -341,4 +385,118 @@ fn seg_hit_rate(ctx: &Ctx) -> String {
     }
     let pct = (c.total_cache_read as f64 / base as f64 * 100.0).round() as u32;
     format!("{}hit {}%{}", DIM, pct, RESET)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cache::SessionCache;
+    use crate::config::Config;
+    use serde_json::json;
+
+    fn ctx_for_test<'a>(
+        stdin: &'a serde_json::Value,
+        cache: &'a SessionCache,
+        cfg: &'a Config,
+    ) -> Ctx<'a> {
+        Ctx { stdin, cache, cfg }
+    }
+
+    #[test]
+    fn short_num_thresholds() {
+        assert_eq!(short_num(0), "0");
+        assert_eq!(short_num(999), "999");
+        assert_eq!(short_num(1_000), "1.0k");
+        assert_eq!(short_num(1_500), "1.5k");
+        assert_eq!(short_num(999_999), "1000.0k");
+        assert_eq!(short_num(1_000_000), "1.0M");
+        assert_eq!(short_num(1_500_000), "1.5M");
+    }
+
+    #[test]
+    fn progress_bar_full_and_empty() {
+        // Empty
+        let s = progress_bar(0.0, 6);
+        assert_eq!(s.chars().count(), 6);
+        assert!(s.chars().all(|c| c == ' '));
+        // Full
+        let s = progress_bar(1.0, 6);
+        assert_eq!(s.chars().count(), 6);
+        assert!(s.chars().all(|c| c == '█'));
+    }
+
+    #[test]
+    fn progress_bar_half() {
+        let s = progress_bar(0.5, 6);
+        assert_eq!(s.chars().count(), 6);
+        let full = s.chars().filter(|&c| c == '█').count();
+        assert_eq!(full, 3, "half of 6 wide should give 3 full blocks");
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn compute_ctx_backsolves_window() {
+        // used = 100k, remaining 50% → physical = 200k, capacity = 200k * 0.95 = 190k
+        let mut cache = SessionCache::default();
+        cache.last_turn_input = 1;
+        cache.last_turn_cache_read = 99_999;
+        cache.last_turn_cache_creation = 0;
+        let stdin = json!({"context_window": {"remaining_percentage": 50.0}});
+        let cfg = Config::default();
+        // Test with PCT default 95 (env unset)
+        std::env::remove_var("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE");
+        let ctx = ctx_for_test(&stdin, &cache, &cfg);
+        let r = compute_ctx(&ctx).unwrap();
+        assert_eq!(r.used, 100_000);
+        // physical = 200_000, capacity = 190_000
+        assert!((r.capacity as i64 - 190_000).abs() < 100);
+        // used_frac = 100_000 / 190_000 ≈ 0.526
+        assert!((r.used_frac - 100_000.0 / 190_000.0).abs() < 0.01);
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn compute_ctx_honors_pct_override() {
+        let mut cache = SessionCache::default();
+        cache.last_turn_input = 100_000;
+        let stdin = json!({"context_window": {"remaining_percentage": 50.0}});
+        let cfg = Config::default();
+        std::env::set_var("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE", "80");
+        let ctx = ctx_for_test(&stdin, &cache, &cfg);
+        let r = compute_ctx(&ctx).unwrap();
+        // physical = 200k, capacity = 200k * 0.80 = 160k
+        assert!((r.capacity as i64 - 160_000).abs() < 100);
+        std::env::remove_var("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE");
+    }
+
+    #[test]
+    fn compute_ctx_returns_none_with_no_used() {
+        let cache = SessionCache::default();
+        let stdin = json!({"context_window": {"remaining_percentage": 80.0}});
+        let cfg = Config::default();
+        let ctx = ctx_for_test(&stdin, &cache, &cfg);
+        assert!(compute_ctx(&ctx).is_none());
+    }
+
+    #[test]
+    fn seg_dir_truncates_to_three_components() {
+        std::env::set_var("HOME", "/Users/test");
+        let stdin = json!({"cwd": "/Users/test/projects/sub/deeper/leaf"});
+        let cache = SessionCache::default();
+        let cfg = Config::default();
+        let ctx = ctx_for_test(&stdin, &cache, &cfg);
+        let s = seg_dir(&ctx);
+        // Should keep the last 3 components only
+        assert!(s.contains("sub/deeper/leaf"), "got: {}", s);
+        assert!(!s.contains("projects"), "got: {}", s);
+    }
+
+    #[test]
+    fn render_unknown_segment_returns_placeholder() {
+        let stdin = serde_json::Value::Null;
+        let cache = SessionCache::default();
+        let cfg = Config::default();
+        let ctx = ctx_for_test(&stdin, &cache, &cfg);
+        assert_eq!(render("nope", &ctx), "{nope}");
+    }
 }

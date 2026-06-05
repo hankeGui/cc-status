@@ -15,7 +15,11 @@ pub fn run() -> anyhow::Result<()> {
         C = CYAN,
         R = RESET
     );
-    println!("  {DIM}lines = [\"{{dir}} {{git}} {{ctx}}\"]{R}", DIM = DIM, R = RESET);
+    println!(
+        "  {DIM}lines = [\"{{dir}} {{git}} {{ctx}}\"]{R}",
+        DIM = DIM,
+        R = RESET
+    );
     println!();
 
     // Compute column width for alignment.
@@ -72,7 +76,24 @@ fn display_width(s: &str) -> usize {
         // Skip ANSI escape sequences (we don't have any in examples, but be safe).
         let cw = if c == '\u{1b}' {
             0
-        } else if (c as u32) > 0x2E80 || matches!(c, '🎯' | '🔥' | '↑' | '↓' | '⇡' | '⇣' | '█' | '▉' | '▊' | '▋' | '▌' | '▍' | '▎' | '▏') {
+        } else if (c as u32) > 0x2E80
+            || matches!(
+                c,
+                '🎯' | '🔥'
+                    | '↑'
+                    | '↓'
+                    | '⇡'
+                    | '⇣'
+                    | '█'
+                    | '▉'
+                    | '▊'
+                    | '▋'
+                    | '▌'
+                    | '▍'
+                    | '▎'
+                    | '▏'
+            )
+        {
             2
         } else {
             1

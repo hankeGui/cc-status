@@ -1,4 +1,4 @@
-# cc-status-line
+# @cc-status-line/cli
 
 Multi-line, mode-switchable status line for [Claude Code](https://docs.claude.com/en/docs/claude-code).
 
@@ -7,7 +7,7 @@ Pure Rust binary, distributed through npm so any Claude Code user can install it
 ## Quick start
 
 ```sh
-npx cc-status-line --version
+npx -y @cc-status-line/cli --version
 ```
 
 Then in `~/.claude/settings.json`:
@@ -16,7 +16,7 @@ Then in `~/.claude/settings.json`:
 {
   "statusLine": {
     "type": "command",
-    "command": "npx -y cc-status-line render"
+    "command": "npx -y @cc-status-line/cli render"
   }
 }
 ```
@@ -24,7 +24,7 @@ Then in `~/.claude/settings.json`:
 For best performance install globally so the binary is on PATH:
 
 ```sh
-npm install -g cc-status-line
+npm install -g @cc-status-line/cli
 ```
 
 Then:

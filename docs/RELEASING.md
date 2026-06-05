@@ -32,27 +32,38 @@ End user install paths (no Rust toolchain needed):
 
 ## One-time maintainer setup
 
-### 1. npm account + token
+### 1. npm account + scope
 
 ```sh
 # If you don't already have an npm account
 npm adduser
+```
 
-# Create an Automation token (scoped to packages, no expiration recommended)
+**Important — the `@cc-status-line` scope must exist before first publish.**
+npm auto-creates *unscoped* packages but never auto-creates a scope. Either:
+
+- **Create a free organization** at <https://www.npmjs.com/org/create> with
+  name `cc-status-line` (Plan: Free / Unlimited Public Packages), or
+- **Change the scope** in `npm/cc-status-line/package.json`,
+  `npm/cc-status-line/index.js`, and the workflow's loop to use your
+  npm username (e.g. `@yourname/...`).
+
+Then create an Automation token:
+
+```sh
 # https://www.npmjs.com/settings/<your-user>/tokens/granular-access-tokens/new
-# Permissions:
-#   Packages and scopes -> "Read and write"
-#   Allowed packages -> cc-status-line, @cc-status-line/*
+# Permissions: Read and write
+# Allowed packages and scopes:
+#   - cc-status-line (the unscoped main package)
+#   - @cc-status-line/* (the scope you just created)
 ```
 
 In GitHub: **Settings → Secrets and variables → Actions → New repository secret**
 - Name: `NPM_TOKEN`
 - Value: the token above
 
-The first `npm publish` will create both the unscoped `cc-status-line`
-and the `@cc-status-line/*` scope automatically — npm requires the
-scope to be free or owned by you (`hankeGui` is fine, scopes default to
-the publishing user).
+The first `npm publish` of each platform sub-package creates that
+`@cc-status-line/<platform>` package.
 
 ### 2. (optional) Homebrew tap
 

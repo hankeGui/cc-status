@@ -8,6 +8,7 @@ mod list_segments;
 mod render;
 mod segments;
 mod segments_meta;
+mod setup;
 mod status;
 mod transcript;
 
@@ -29,6 +30,20 @@ enum Cmd {
     Explain,
     /// List every segment available for use in mode templates.
     Segments,
+    /// One-shot configuration: write the `statusLine` block into
+    /// `~/.claude/settings.json` (with backup). Detects npx vs binary
+    /// install and writes the appropriate command.
+    Setup {
+        /// Skip confirmation prompts.
+        #[arg(long)]
+        yes: bool,
+        /// Report current state without making changes.
+        #[arg(long)]
+        check: bool,
+        /// Remove the statusLine block instead of installing it.
+        #[arg(long)]
+        uninstall: bool,
+    },
     /// Manage display modes (switch / add / remove / list).
     Mode {
         #[command(subcommand)]
@@ -83,6 +98,15 @@ fn main() -> Result<()> {
         Cmd::Status => status::run(),
         Cmd::Explain => explain::run(),
         Cmd::Segments => list_segments::run(),
+        Cmd::Setup {
+            yes,
+            check,
+            uninstall,
+        } => setup::run(setup::Args {
+            yes,
+            check,
+            uninstall,
+        }),
         Cmd::Mode { action, name } => match (action, name) {
             (Some(ModeAction::List), _) => config::list_modes(),
             (Some(ModeAction::Add { name, lines, force }), _) => {

@@ -19,7 +19,24 @@ cp target/release/ccs ~/.local/bin/        # 或任何在 PATH 里的目录
 
 ### 1.2 接到 Claude Code
 
-编辑 `~/.claude/settings.json`：
+**推荐：用 `ccs setup` 自动配置**
+
+```sh
+ccs setup
+```
+
+它会：
+1. 检查 `~/.claude/settings.json` 是否存在 / 合法
+2. 显示要做的改动（让你预览）
+3. 问 y/N 确认
+4. 备份原文件（`settings.json.bak-<时间戳>`）后写入
+
+参数：
+- `--yes` 跳过确认（脚本里用）
+- `--check` 只报告状态、不改动
+- `--uninstall` 移除 statusLine 配置
+
+**或者手动改** `~/.claude/settings.json`：
 
 ```json
 {
@@ -324,10 +341,14 @@ ls -t ~/.claude/projects/-Users-YOU-path-to-project/*.jsonl | head -1
 
 ```sh
 ccs render                  # 给 CC 用的，读 stdin 输出 ANSI
+ccs setup                   # 配置 ~/.claude/settings.json（交互式）
+ccs setup --yes             # 同上，跳过确认
+ccs setup --check           # 只报告状态，不改
+ccs setup --uninstall       # 移除 statusLine 配置
 ccs status                  # 详情面板
 ccs explain                 # 图例
 ccs segments                # 列出所有可选段
-ccs mode                    # = ccs mode list（列出所有模式）
+ccs mode                    # = ccs mode list
 ccs mode list               # 列出所有已有模式
 ccs mode <name>             # 切到某模式
 ccs mode add <name> -l "..." [-l "..."] [--force]
