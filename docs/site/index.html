@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>cc-status — multi-line status line for Claude Code</title>
+<meta name="description" content="Pure Rust binary, distributed via npm, with cost tracking, prompt-cache TTL, hit-rate, burn-rate, Skill/MCP usage, and a daemon mode." />
+<style>
+  :root {
+    --fg: #1a1d23;
+    --fg-dim: #5b6573;
+    --bg: #fafbfc;
+    --card: #ffffff;
+    --border: #e2e6ec;
+    --accent: #6b46c1;
+    --code-bg: #1a1d23;
+    --code-fg: #e3e6eb;
+    --green: #16a34a;
+    --orange: #ea580c;
+    --red: #dc2626;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fg: #e3e6eb;
+      --fg-dim: #9ba3af;
+      --bg: #0f1115;
+      --card: #161922;
+      --border: #2a2e36;
+      --accent: #a78bfa;
+      --code-bg: #0a0c10;
+      --code-fg: #e3e6eb;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", system-ui, sans-serif;
+    color: var(--fg); background: var(--bg);
+  }
+  main { max-width: 880px; margin: 0 auto; padding: 48px 24px 96px; }
+  header { text-align: center; margin-bottom: 48px; }
+  header h1 { font-size: 2.4rem; margin: 0 0 8px; letter-spacing: -.02em; }
+  header p.tag { font-size: 1.15rem; color: var(--fg-dim); margin: 0 0 24px; }
+  .badges { display: inline-flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  .badge {
+    font-size: .82rem; padding: 4px 10px; border-radius: 999px;
+    background: var(--card); border: 1px solid var(--border); color: var(--fg-dim);
+  }
+  .ctas { margin-top: 24px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .btn {
+    display: inline-block; padding: 10px 18px; border-radius: 8px;
+    font-weight: 600; text-decoration: none; font-size: .95rem;
+    border: 1px solid var(--border);
+  }
+  .btn.primary { background: var(--accent); color: white; border-color: var(--accent); }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .btn:hover { background: var(--card); }
+  section { margin: 56px 0; }
+  section h2 { font-size: 1.6rem; margin: 0 0 16px; letter-spacing: -.01em; }
+  section h3 { font-size: 1.05rem; margin: 24px 0 8px; color: var(--fg-dim); font-weight: 600; }
+  pre {
+    background: var(--code-bg); color: var(--code-fg);
+    padding: 16px 20px; border-radius: 8px;
+    overflow-x: auto; font-size: .9rem; line-height: 1.5;
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  }
+  code { font-family: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace; }
+  p code, li code { background: var(--card); border: 1px solid var(--border); padding: 1px 6px; border-radius: 4px; font-size: .88em; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; }
+  .card h3 { margin: 0 0 6px; font-size: 1rem; color: var(--fg); }
+  .card p { margin: 0; color: var(--fg-dim); font-size: .92rem; }
+  .demo {
+    background: var(--code-bg); color: var(--code-fg);
+    padding: 14px 18px; border-radius: 8px; font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: .9rem; line-height: 1.5;
+    overflow-x: auto;
+  }
+  .demo .c { color: #5dd1e0; }   /* cyan */
+  .demo .m { color: #c084fc; }   /* magenta */
+  .demo .g { color: #4ade80; }   /* green */
+  .demo .y { color: #fbbf24; }   /* yellow */
+  .demo .r { color: #f87171; }   /* red */
+  .demo .d { color: #6b7280; }   /* dim */
+  footer { margin-top: 80px; padding-top: 32px; border-top: 1px solid var(--border); color: var(--fg-dim); font-size: .9rem; text-align: center; }
+  footer a { color: var(--fg-dim); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>cc-status</h1>
+    <p class="tag">A multi-line, mode-switchable status line for <a href="https://docs.claude.com/en/docs/claude-code">Claude Code</a>.</p>
+    <div class="badges">
+      <span class="badge">Rust</span>
+      <span class="badge">npm: @cc-status-line/cli</span>
+      <span class="badge">macOS · Linux</span>
+      <span class="badge">MIT</span>
+    </div>
+    <div class="ctas">
+      <a class="btn primary" href="https://github.com/hankeGui/cc-status">GitHub</a>
+      <a class="btn" href="https://github.com/hankeGui/cc-status/blob/main/README.md">README</a>
+      <a class="btn" href="https://github.com/hankeGui/cc-status/blob/main/docs/USAGE.zh.md">中文文档</a>
+    </div>
+  </header>
+
+  <section>
+    <h2>What it looks like</h2>
+    <p style="color: var(--fg-dim);">Mode <code>detailed</code> — three lines, all metrics:</p>
+    <div class="demo"><span class="c">~/hanke-dev/cc-status</span> <span class="m">main</span> <span class="d">Claude Opus 4.7</span><br><span class="g">ctx 86% █████▏</span> <span class="d">154.6k/950k</span>  <span class="d">↑12.3k ↓2.1k +865 🎯89%</span>  <span class="d">cache 4:42</span>  <span class="d">hit 96%</span>  <span class="d">🔥 32.4k/min</span><br><span class="d">skills: jira×3 wiki×1   mcp: github×2</span></div>
+
+    <p style="color: var(--fg-dim); margin-top: 24px;">Mode <code>cost</code> — focused on USD spend:</p>
+    <div class="demo"><span class="c">~/hanke-dev/cc-status</span> <span class="m">main</span> <span class="d">Opus</span> <span class="g">ctx 85% █████▏</span> <span class="d">154.6k/950k</span><br><span class="d">last $0.012</span> <span class="d">sess $1.42</span> <span class="d">today $4.18</span> <span class="d">7d $24.50</span></div>
+
+    <p style="margin-top: 24px;"><a href="https://github.com/hankeGui/cc-status#three-ways-to-interact">7 built-in modes</a> · build your own with <code>ccs mode add</code> / <code>ccs mode append</code> / <code>ccs mode edit</code>.</p>
+  </section>
+
+  <section>
+    <h2>Why</h2>
+    <p>Most Claude Code status lines stop at "model name + remaining percent." That hides what actually drives cost and behavior. cc-status surfaces it:</p>
+    <div class="cards">
+      <div class="card"><h3>Token flow</h3><p>Last turn input / output / cache write, with hit rate. See cache wins as they happen.</p></div>
+      <div class="card"><h3>Prompt-cache TTL</h3><p>5-minute countdown; warns red under 1 minute. Don't pay the rebuild cost by accident.</p></div>
+      <div class="card"><h3>USD cost</h3><p>Per-turn / per-session / today / last-7-days. Built-in Anthropic prices, override per model.</p></div>
+      <div class="card"><h3>Real context capacity</h3><p>Backsolves the 1M-tier window so the bar means something on extended-context models.</p></div>
+      <div class="card"><h3>Skill / MCP usage</h3><p>Counts which Skills and MCP servers got called this session — handy when debugging your prompt.</p></div>
+      <div class="card"><h3>Worktree-aware git</h3><p>Branch, ahead/behind, dirty flags, and the worktree name when you're inside one.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Install</h2>
+    <h3>npm (recommended for Claude Code users)</h3>
+<pre><code>npm install -g @cc-status-line/cli
+ccs setup</code></pre>
+    <h3>curl</h3>
+<pre><code>curl -fsSL https://raw.githubusercontent.com/hankeGui/cc-status/main/install.sh | sh
+ccs setup</code></pre>
+    <h3>From source</h3>
+<pre><code>cargo install --git https://github.com/hankeGui/cc-status --locked</code></pre>
+    <p style="color: var(--fg-dim);">After install, <code>ccs setup</code> writes the <code>statusLine</code> block into <code>~/.claude/settings.json</code> with a backup. Restart Claude Code and you're done.</p>
+  </section>
+
+  <section>
+    <h2>Power user moves</h2>
+<pre><code>ccs explain                         # legend for every glyph
+ccs status                          # full session dashboard
+ccs cost --days 30                  # ASCII cost-by-day chart
+ccs mode append cost_today          # add a segment to your current mode
+ccs mode edit                       # open the current mode in $EDITOR
+ccs daemon start                    # optional Unix-socket daemon
+ccs upgrade                         # auto-detect install method and update</code></pre>
+  </section>
+
+  <footer>
+    Built by <a href="https://github.com/hankeGui">@hankeGui</a> · MIT License ·
+    Open an issue on <a href="https://github.com/hankeGui/cc-status/issues">GitHub</a>
+  </footer>
+</main>
+</body>
+</html>

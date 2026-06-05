@@ -25,6 +25,17 @@ pub struct Ctx<'a> {
 }
 
 pub fn render(name: &str, ctx: &Ctx) -> String {
+    // Fault isolation: any panic in a single segment must not blank out
+    // the whole status line. Catch the unwind and return empty so the
+    // surrounding renderer's `collapse_spaces` cleans the gap.
+    let name = name.to_string();
+    // SAFETY: Ctx fields are simple references; no lock/UnwindSafe issues.
+    let result =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| render_inner(&name, ctx)));
+    result.unwrap_or_default()
+}
+
+fn render_inner(name: &str, ctx: &Ctx) -> String {
     match name {
         "dir" => seg_dir(ctx),
         "git" => seg_git(ctx),
@@ -156,20 +167,35 @@ fn seg_git(ctx: &Ctx) -> String {
 }
 
 fn run_git(cwd: &str, args: &[&str]) -> Option<String> {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(cwd)
-        .args(args)
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if s.is_empty() {
-        None
-    } else {
-        Some(s)
+    // Hard timeout: huge monorepos can make `git status` take >1s, which
+    // blows past Claude Code's status-line budget. Use a wait-with-deadline
+    // so we abandon stuck commands (the child is left to die when our
+    // process exits — acceptable for status-line tooling).
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let cwd = cwd.to_string();
+    let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+    let (tx, rx) = mpsc::channel::<Option<String>>();
+    let _handle = std::thread::spawn(move || {
+        let out = Command::new("git").arg("-C").arg(&cwd).args(&args).output();
+        let result = match out {
+            Ok(o) if o.status.success() => {
+                let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                if s.is_empty() {
+                    None
+                } else {
+                    Some(s)
+                }
+            }
+            _ => None,
+        };
+        let _ = tx.send(result);
+    });
+
+    match rx.recv_timeout(Duration::from_millis(150)) {
+        Ok(v) => v,
+        Err(_) => None, // timeout — leak the thread (it will finish or die at exit)
     }
 }
 

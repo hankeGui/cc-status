@@ -1,6 +1,9 @@
 # cc-status
 
-> Multi-line, mode-switchable status line for [Claude Code](https://docs.claude.com/en/docs/claude-code) — written in Rust, no daemon, ~20 ms render.
+> Multi-line, mode-switchable status line for [Claude Code](https://docs.claude.com/en/docs/claude-code) — written in Rust, with optional daemon, ~140ms cold render.
+
+🌐 **Site**: <https://hankegui.github.io/cc-status>
+🐙 **Source**: <https://github.com/hankeGui/cc-status>
 
 ```
 ~/hanke-dev/cc-status main  Claude Opus 4.7  ctx 86% █████▏  154.6k/950k
@@ -11,6 +14,8 @@
 ctx 86% █████▏ 154.6k/950k  ↑154.6k ↓185 +687 🎯99%  cache 4:47  hit 96%  🔥 32.4k/min
 skills: jira×3 wiki×1   mcp: github×2
 ```
+
+> Run `bash scripts/screenshots.sh` (with `freeze` on PATH) to regenerate the PNG/SVG screenshots embedded above.
 
 ## Why
 
@@ -292,11 +297,15 @@ file; subsequent renders only read newly-appended bytes.
 
 ## Roadmap
 
-- [ ] Daemon mode (Unix socket) for sub-ms cold start
-- [ ] Cost segment with per-model pricing
+- [x] Daemon mode (Unix socket) for sub-ms cold start
+- [x] Cost segment with per-model pricing
+- [x] Cross-session cost dashboard (`ccs cost`)
+- [x] Auto-update (`ccs upgrade`)
+- [x] Shell completions
 - [ ] Per-session colors / titles (parallel CC instances)
 - [ ] Pace-aware quota burn warning
 - [ ] Plugin segments (custom shell commands)
+- [ ] Re-enable Windows builds
 
 ## License
 

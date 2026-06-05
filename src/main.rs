@@ -1,8 +1,11 @@
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::{generate, Shell};
 
 mod cache;
 mod config;
+mod cost;
+mod daemon;
 mod explain;
 mod list_segments;
 mod pricing;
@@ -13,6 +16,7 @@ mod segments_meta;
 mod setup;
 mod status;
 mod transcript;
+mod upgrade;
 
 #[derive(Parser)]
 #[command(name = "ccs", version, about = "Claude Code status line")]
@@ -32,6 +36,12 @@ enum Cmd {
     Explain,
     /// List every segment available for use in mode templates.
     Segments,
+    /// Print a multi-day cost dashboard (uses the cross-session rollup).
+    Cost {
+        /// Number of days to display (default 7, max 90).
+        #[arg(long, default_value_t = 7)]
+        days: usize,
+    },
     /// One-shot configuration: write the `statusLine` block into
     /// `~/.claude/settings.json` (with backup). Detects npx vs binary
     /// install and writes the appropriate command.
@@ -45,6 +55,25 @@ enum Cmd {
         /// Remove the statusLine block instead of installing it.
         #[arg(long)]
         uninstall: bool,
+    },
+    /// Upgrade ccs in place using the original install method.
+    Upgrade {
+        /// Skip the confirmation prompt.
+        #[arg(long)]
+        yes: bool,
+        /// Detect install method but don't run anything.
+        #[arg(long)]
+        check: bool,
+    },
+    /// Optional Unix-socket daemon for sub-millisecond status-line refresh.
+    Daemon {
+        #[command(subcommand)]
+        action: DaemonAction,
+    },
+    /// Generate shell completion script for bash / zsh / fish / etc.
+    Completions {
+        /// Target shell.
+        shell: Shell,
     },
     /// Manage display modes (switch / add / remove / list).
     Mode {
@@ -61,6 +90,22 @@ enum Cmd {
     },
     /// Print resolved config path.
     ConfigPath,
+}
+
+#[derive(Subcommand)]
+enum DaemonAction {
+    /// Start the daemon (forks into the background by default).
+    Start {
+        /// Run in the foreground (don't fork). Useful for launchd / systemd.
+        #[arg(long)]
+        foreground: bool,
+    },
+    /// Stop a running daemon (SIGTERM).
+    Stop,
+    /// Restart the daemon.
+    Restart,
+    /// Show daemon status.
+    Status,
 }
 
 #[derive(Subcommand)]
@@ -122,6 +167,7 @@ fn main() -> Result<()> {
         Cmd::Status => status::run(),
         Cmd::Explain => explain::run(),
         Cmd::Segments => list_segments::run(),
+        Cmd::Cost { days } => cost::run(cost::Args { days }),
         Cmd::Setup {
             yes,
             check,
@@ -131,6 +177,23 @@ fn main() -> Result<()> {
             check,
             uninstall,
         }),
+        Cmd::Upgrade { yes, check } => upgrade::run(upgrade::Args { yes, check }),
+        Cmd::Daemon { action } => match action {
+            DaemonAction::Start { foreground } => daemon::start(daemon::StartArgs { foreground }),
+            DaemonAction::Stop => daemon::stop(),
+            DaemonAction::Restart => {
+                let _ = daemon::stop();
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                daemon::start(daemon::StartArgs::default())
+            }
+            DaemonAction::Status => daemon::status(),
+        },
+        Cmd::Completions { shell } => {
+            let mut cmd = Cli::command();
+            let bin_name = cmd.get_name().to_string();
+            generate(shell, &mut cmd, bin_name, &mut std::io::stdout());
+            Ok(())
+        }
         Cmd::Mode { action, name } => match (action, name) {
             (Some(ModeAction::List), _) => config::list_modes(),
             (Some(ModeAction::Add { name, lines, force }), _) => {

@@ -1,4 +1,4 @@
-use crate::{cache, config, rollup, segments, transcript};
+use crate::{cache, config, daemon, rollup, segments, transcript};
 use anyhow::Result;
 use serde_json::Value;
 use std::io::Read;
@@ -13,6 +13,22 @@ pub fn run() -> Result<()> {
         serde_json::from_str(&buf).unwrap_or(Value::Null)
     };
 
+    // Try the daemon first; fall back to inline rendering on any failure
+    // so the user is never blocked by a crashed daemon.
+    if let Some(out) = daemon::try_render_via_daemon(&stdin) {
+        println!("{}", out);
+        return Ok(());
+    }
+
+    let out = render_string(&stdin)?;
+    println!("{}", out);
+    Ok(())
+}
+
+/// Pure rendering path: takes the parsed CC stdin JSON and returns the
+/// final ANSI string (without a trailing newline). Shared between
+/// `ccs render` and the daemon's request handler.
+pub fn render_string(stdin: &Value) -> Result<String> {
     let cfg = config::load()?;
 
     let session_id = stdin
@@ -33,13 +49,11 @@ pub fn run() -> Result<()> {
     let mode_name = &cfg.current_mode;
     let mode = cfg.modes.get(mode_name).or_else(|| cfg.modes.get("full"));
     let Some(mode) = mode else {
-        println!();
-        return Ok(());
+        return Ok(String::new());
     };
 
     // Only do the cross-session rollup scan if a cost_today / cost_week
-    // / cost segment is actually referenced by the active mode. The
-    // scan is incremental but still touches every transcript file.
+    // / cost segment is actually referenced by the active mode.
     let needs_rollup = mode.lines.iter().any(|line| {
         line.contains("{cost_today}") || line.contains("{cost_week}") || line.contains("{cost}")
     });
@@ -53,7 +67,7 @@ pub fn run() -> Result<()> {
     };
 
     let ctx = segments::Ctx {
-        stdin: &stdin,
+        stdin,
         cache: &sess,
         cfg: &cfg,
         rollup: rollup_data.as_ref(),
@@ -64,8 +78,7 @@ pub fn run() -> Result<()> {
         .iter()
         .map(|tpl| render_line(tpl, &ctx))
         .collect();
-    println!("{}", lines.join("\n"));
-    Ok(())
+    Ok(lines.join("\n"))
 }
 
 fn render_line(template: &str, ctx: &segments::Ctx) -> String {
