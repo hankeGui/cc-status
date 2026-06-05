@@ -240,30 +240,62 @@ fn home_dir() -> Result<PathBuf> {
 /// Decide what command string to put in settings.json.
 ///
 /// Priority:
-///   1. If we appear to be running via npm/npx (heuristic: the binary
-///      lives inside an npm cache directory, OR the parent process set
-///      npm-related env vars), write
-///      `npx -y @cc-status-line/cli render` so the user doesn't depend
-///      on a local install path that might disappear.
-///   2. Otherwise, use the absolute path of the current binary.
+///   1. If we live inside an npm-installed `@cc-status-line/<platform>`
+///      sub-package, walk up the tree to find the npm `bin/ccs` symlink
+///      (the JS wrapper in the prefix). That path is stable across
+///      reinstalls/version bumps for a given Node version.
+///   2. If we appear to be running via npx ephemerally (npm cache
+///      directory or npm env vars), write `npx -y @cc-status-line/cli
+///      render` so the user doesn't depend on a transient cache path.
+///   3. Otherwise (curl install, brew, manual), use the absolute path
+///      of the current binary.
 fn pick_command() -> Result<String> {
     let exe = std::env::current_exe().context("locate current executable")?;
     let exe_str = exe.to_string_lossy();
 
+    // Case 1: npm global install. We're at:
+    //   <prefix>/lib/node_modules/@cc-status-line/cli/node_modules/@cc-status-line/<plat>/bin/ccs
+    // The `ccs` JS wrapper lives at <prefix>/bin/ccs (a symlink).
+    if exe_str.contains("/node_modules/@cc-status-line/")
+        && exe_str.contains("/bin/ccs")
+    {
+        if let Some(prefix) = npm_prefix_from_module_path(&exe) {
+            let wrapper = prefix.join("bin").join("ccs");
+            if wrapper.exists() {
+                return Ok(format!("{} render", wrapper.display()));
+            }
+        }
+    }
+
+    // Case 2: ephemeral npx run (cache dir or npm env vars).
     let in_npm_cache = exe_str.contains("/_npx/")
         || exe_str.contains("/.npm/_npx/")
         || exe_str.contains("/npm-cache/")
         || exe_str.contains("/_cacache/")
         || exe_str.contains("\\npm-cache\\")
         || exe_str.contains("\\_npx\\");
-
-    // npm/npx set this env var to e.g. "npm/10.5.0 node/v20.10.0 ...".
     let from_npm_env = std::env::var("npm_config_user_agent").is_ok()
         || std::env::var("npm_lifecycle_event").is_ok()
         || std::env::var("npm_package_name").is_ok();
-
     if in_npm_cache || from_npm_env {
         return Ok("npx -y @cc-status-line/cli render".into());
     }
+
+    // Case 3: plain binary install.
     Ok(format!("{} render", exe.display()))
+}
+
+/// Given an exe path inside `<prefix>/lib/node_modules/.../bin/ccs`,
+/// return `<prefix>` so we can reach the wrapper at `<prefix>/bin/ccs`.
+fn npm_prefix_from_module_path(exe: &std::path::Path) -> Option<PathBuf> {
+    // Walk up until we find a directory whose parent contains `lib/node_modules`.
+    let mut cur = exe.parent()?.to_path_buf();
+    while cur.parent().is_some() {
+        let candidate = cur.join("lib").join("node_modules");
+        if candidate.is_dir() {
+            return Some(cur);
+        }
+        cur = cur.parent()?.to_path_buf();
+    }
+    None
 }
