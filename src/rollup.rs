@@ -1,4 +1,4 @@
-//! Cross-session rollup: aggregate token counts (per model, per UTC
+//! Cross-session rollup: aggregate token counts (per model, per local
 //! day) by walking every transcript under `~/.claude/projects/`.
 //!
 //! State persists at `$XDG_CACHE_HOME/cc-status/rollup.json`. We track
@@ -425,7 +425,7 @@ mod tests {
     #[test]
     fn sum_last_days_works() {
         let mut r = Rollup::default();
-        let today = chrono::Utc::now();
+        let today = chrono::Local::now();
         let key = format!(
             "{:04}-{:02}-{:02}",
             today.year(),

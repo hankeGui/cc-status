@@ -77,7 +77,7 @@ pub const SEGMENTS: &[SegmentInfo] = &[
     SegmentInfo {
         name: "cost_today",
         example: "today $4.18",
-        description: "Cost across all sessions today (UTC), all models",
+        description: "Cost across all sessions today (local time), all models",
     },
     SegmentInfo {
         name: "cost_week",

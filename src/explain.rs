@@ -42,7 +42,7 @@ pub fn run() -> anyhow::Result<()> {
 {B}Cost segments (opt-in){R}
   {DIM}last $0.012{R}           {{cost_last}}     last assistant turn (current session, current model)
   {DIM}sess $1.42{R}            {{cost_session}}  cumulative for the current session
-  {DIM}today $4.18{R}           {{cost_today}}    every session today (UTC), all models
+  {DIM}today $4.18{R}           {{cost_today}}    every session today (local time), all models
   {DIM}7d $24.50{R}             {{cost_week}}     last 7 days, all models
   {DIM}last $0.012 · today $4.18{R}  {{cost}}     compact combo (cost_last + cost_today)
   Built-in prices follow Anthropic's published per-million-token rates;
