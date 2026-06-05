@@ -190,7 +190,10 @@ pub fn run() -> Result<()> {
             DIM,
             RESET
         );
-        println!("│   model output {} tokens", short_num(sess.last_turn_output));
+        println!(
+            "│   model output {} tokens",
+            short_num(sess.last_turn_output)
+        );
         println!("│   hit rate     {}{}%{}", color_for_hit(hit), hit, RESET);
     }
 
@@ -264,10 +267,7 @@ pub fn run() -> Result<()> {
     // --- tool calls ---
     println!("{B}│ Tool calls{R}", B = BOLD, R = RESET);
     if sess.skill_counts.is_empty() && sess.mcp_counts.is_empty() {
-        println!(
-            "│   {}no Skill / MCP calls in this session{}",
-            DIM, RESET
-        );
+        println!("│   {}no Skill / MCP calls in this session{}", DIM, RESET);
     } else {
         if sess.skill_counts.is_empty() {
             println!("│   Skills    {}—{}", DIM, RESET);

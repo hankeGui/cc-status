@@ -256,9 +256,7 @@ fn pick_command() -> Result<String> {
     // Case 1: npm global install. We're at:
     //   <prefix>/lib/node_modules/@cc-status-line/cli/node_modules/@cc-status-line/<plat>/bin/ccs
     // The `ccs` JS wrapper lives at <prefix>/bin/ccs (a symlink).
-    if exe_str.contains("/node_modules/@cc-status-line/")
-        && exe_str.contains("/bin/ccs")
-    {
+    if exe_str.contains("/node_modules/@cc-status-line/") && exe_str.contains("/bin/ccs") {
         if let Some(prefix) = npm_prefix_from_module_path(&exe) {
             let wrapper = prefix.join("bin").join("ccs");
             if wrapper.exists() {

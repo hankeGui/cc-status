@@ -14,8 +14,13 @@ fn ccs(tmp: &TempDir) -> Command {
     c.env("XDG_CONFIG_HOME", tmp.path().join("config"))
         .env("XDG_CACHE_HOME", tmp.path().join("cache"))
         .env("XDG_DATA_HOME", tmp.path().join("data"))
-        // macOS uses Library/Application Support — point HOME to the tmp dir.
+        // macOS picks paths from $HOME's Library; Windows picks them
+        // from %APPDATA% / %LOCALAPPDATA%. Override all three so
+        // every test gets a fresh, isolated config + cache directory
+        // regardless of platform.
         .env("HOME", tmp.path())
+        .env("APPDATA", tmp.path().join("appdata"))
+        .env("LOCALAPPDATA", tmp.path().join("localappdata"))
         // Drop any user-level NPM env so setup picks the binary path branch.
         .env_remove("npm_config_user_agent")
         .env_remove("npm_lifecycle_event")
@@ -192,8 +197,14 @@ fn setup_yes_writes_statusline_and_backs_up() {
     assert!(written.contains("statusLine"));
     // The command path is platform-specific (Unix: `/path/to/ccs render`,
     // Windows: `C:\\path\\to\\ccs.exe render`). Just check the shape.
-    assert!(written.contains("\"command\""), "should write a command field");
-    assert!(written.contains("ccs"), "command should reference the ccs binary");
+    assert!(
+        written.contains("\"command\""),
+        "should write a command field"
+    );
+    assert!(
+        written.contains("ccs"),
+        "command should reference the ccs binary"
+    );
     assert!(
         written.contains("someUnrelated"),
         "setup must preserve other keys"
