@@ -113,8 +113,22 @@ case ":${PATH}:" in
 esac
 
 echo
-echo "Next steps:"
-echo "  1. Edit ~/.claude/settings.json:"
-echo "       \"statusLine\": { \"type\": \"command\", \"command\": \"${BIN_DIR}/ccs render\" }"
-echo "  2. Restart Claude Code."
-echo "  3. See https://github.com/${REPO} for usage."
+echo "─────────────────────────────────────────────────────────"
+echo "Next: wire ccs into Claude Code's ~/.claude/settings.json."
+echo "─────────────────────────────────────────────────────────"
+echo
+echo "Run this now:"
+echo "  ${BIN_DIR}/ccs setup"
+echo
+echo "It will:"
+echo "  • check ~/.claude/settings.json"
+echo "  • show the proposed change"
+echo "  • back the file up before writing"
+echo "  • prompt for y/N (or pass --yes to skip)"
+echo
+echo "Other handy commands:"
+echo "  ${BIN_DIR}/ccs explain     — what every status-line segment means"
+echo "  ${BIN_DIR}/ccs status      — full session dashboard"
+echo "  ${BIN_DIR}/ccs --help      — show all subcommands"
+echo
+echo "Docs: https://github.com/${REPO}"
