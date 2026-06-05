@@ -41,6 +41,9 @@ enum Cmd {
         /// Number of days to display (default 7, max 90).
         #[arg(long, default_value_t = 7)]
         days: usize,
+        /// Print per-file token / cost / dedupe breakdown.
+        #[arg(long)]
+        debug: bool,
     },
     /// One-shot configuration: write the `statusLine` block into
     /// `~/.claude/settings.json` (with backup). Detects npx vs binary
@@ -167,7 +170,7 @@ fn main() -> Result<()> {
         Cmd::Status => status::run(),
         Cmd::Explain => explain::run(),
         Cmd::Segments => list_segments::run(),
-        Cmd::Cost { days } => cost::run(cost::Args { days }),
+        Cmd::Cost { days, debug } => cost::run(cost::Args { days, debug }),
         Cmd::Setup {
             yes,
             check,

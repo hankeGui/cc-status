@@ -323,6 +323,179 @@ pub fn sum_last_days(r: &Rollup, days: i64) -> HashMap<String, DayBucket> {
     out
 }
 
+/// Per-file debug breakdown for a given date range.
+///
+/// For each transcript file, returns its dedupe'd contribution to the
+/// `[from_day, to_day]` window, plus how many entries it had and how
+/// many were dedupe-skipped. Used by `ccs cost --debug` to surface
+/// where token counts come from when reconciling against another tool.
+#[derive(Debug, Clone)]
+pub struct FileContribution {
+    pub path: PathBuf,
+    pub entries_total: u64,
+    pub entries_unique: u64,
+    pub entries_skipped_date: u64,
+    pub bucket: DayBucket,
+    pub model: String,
+}
+
+pub fn debug_per_file(from_day: &str, to_day: &str) -> Vec<FileContribution> {
+    let Some(root) = projects_dir() else {
+        return Vec::new();
+    };
+    let Ok(entries) = std::fs::read_dir(&root) else {
+        return Vec::new();
+    };
+
+    let mut out = Vec::new();
+    for proj in entries.flatten() {
+        let proj_path = proj.path();
+        if !proj_path.is_dir() {
+            continue;
+        }
+        let Ok(files) = std::fs::read_dir(&proj_path) else {
+            continue;
+        };
+        for f in files.flatten() {
+            let path = f.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("jsonl") {
+                continue;
+            }
+            if let Some(c) = walk_file_for_debug(&path, from_day, to_day) {
+                out.push(c);
+            }
+        }
+    }
+
+    // Sort by total tokens desc so the heaviest contributors show first.
+    out.sort_by(|a, b| {
+        let total_a =
+            a.bucket.input + a.bucket.output + a.bucket.cache_read + a.bucket.cache_creation;
+        let total_b =
+            b.bucket.input + b.bucket.output + b.bucket.cache_read + b.bucket.cache_creation;
+        total_b.cmp(&total_a)
+    });
+    out
+}
+
+fn walk_file_for_debug(path: &Path, from_day: &str, to_day: &str) -> Option<FileContribution> {
+    let f = File::open(path).ok()?;
+    let reader = BufReader::new(f);
+
+    let mut entries_total: u64 = 0;
+    let mut entries_skipped_date: u64 = 0;
+    let mut last_model = String::new();
+    let mut bucket = DayBucket::default();
+    let mut seen: HashMap<String, (u64, u64, u64, u64, u64)> = HashMap::new(); // key → (total, in, out, cr, cc)
+
+    for line in reader.lines() {
+        let Ok(line) = line else { break };
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(v): Result<Value, _> = serde_json::from_str(&line) else {
+            continue;
+        };
+        if v.get("type").and_then(|x| x.as_str()) != Some("assistant") {
+            continue;
+        }
+        if let Some(m) = v.pointer("/message/model").and_then(|x| x.as_str()) {
+            last_model = m.to_string();
+        }
+
+        let Some(usage) = v.pointer("/message/usage") else {
+            continue;
+        };
+        let input = usage
+            .get("input_tokens")
+            .and_then(|x| x.as_u64())
+            .unwrap_or(0);
+        let output = usage
+            .get("output_tokens")
+            .and_then(|x| x.as_u64())
+            .unwrap_or(0);
+        let cache_read = usage
+            .get("cache_read_input_tokens")
+            .and_then(|x| x.as_u64())
+            .unwrap_or(0);
+        let cache_creation = usage
+            .get("cache_creation_input_tokens")
+            .and_then(|x| x.as_u64())
+            .unwrap_or(0);
+        if input + output + cache_read + cache_creation == 0 {
+            continue;
+        }
+
+        // Date filter (local time)
+        let day = v
+            .get("timestamp")
+            .and_then(|x| x.as_str())
+            .and_then(|ts| DateTime::parse_from_rfc3339(ts).ok())
+            .map(|dt| dt.with_timezone(&Local).format("%Y-%m-%d").to_string());
+        let Some(day) = day else {
+            continue;
+        };
+        entries_total += 1;
+        if day.as_str() < from_day || day.as_str() > to_day {
+            entries_skipped_date += 1;
+            continue;
+        }
+
+        // Dedupe by (message_id, requestId).
+        let key = v
+            .pointer("/message/id")
+            .and_then(|x| x.as_str())
+            .map(|mid| {
+                let req = v
+                    .get("requestId")
+                    .or_else(|| v.get("request_id"))
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("");
+                format!("{}|{}", mid, req)
+            });
+
+        let new_total = input + output + cache_read + cache_creation;
+        let mut credit = (input, output, cache_read, cache_creation);
+
+        if let Some(k) = &key {
+            if let Some(prev) = seen.get(k).copied() {
+                if new_total <= prev.0 {
+                    continue; // skip dup
+                }
+                // upgrade
+                credit = (
+                    input.saturating_sub(prev.1),
+                    output.saturating_sub(prev.2),
+                    cache_read.saturating_sub(prev.3),
+                    cache_creation.saturating_sub(prev.4),
+                );
+            }
+            seen.insert(
+                k.clone(),
+                (new_total, input, output, cache_read, cache_creation),
+            );
+        }
+
+        bucket.input += credit.0;
+        bucket.output += credit.1;
+        bucket.cache_read += credit.2;
+        bucket.cache_creation += credit.3;
+    }
+
+    let total = bucket.input + bucket.output + bucket.cache_read + bucket.cache_creation;
+    if total == 0 {
+        return None;
+    }
+    Some(FileContribution {
+        path: path.to_path_buf(),
+        entries_total,
+        entries_unique: seen.len() as u64,
+        entries_skipped_date,
+        bucket,
+        model: last_model,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
