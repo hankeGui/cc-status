@@ -18,7 +18,6 @@ function resolveBinary() {
 
   const map = {
     "darwin-arm64": "@cc-status-line/darwin-arm64",
-    "darwin-x64": "@cc-status-line/darwin-x64",
     "linux-x64": "@cc-status-line/linux-x64",
     "linux-arm64": "@cc-status-line/linux-arm64",
     "win32-x64": "@cc-status-line/win32-x64",

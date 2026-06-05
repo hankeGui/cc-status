@@ -29,10 +29,6 @@ jobs:
             os: macos-14
             npm_platform: darwin-arm64
             bin: ccs
-          - target: x86_64-apple-darwin
-            os: macos-13
-            npm_platform: darwin-x64
-            bin: ccs
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-22.04
             npm_platform: linux-x64
@@ -188,7 +184,7 @@ jobs:
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
           set -euo pipefail
-          for plat in darwin-arm64 darwin-x64 linux-x64 linux-arm64 win32-x64; do
+          for plat in darwin-arm64 linux-x64 linux-arm64 win32-x64; do
             pkg_dir="npm/platforms/${plat}"
             mkdir -p "${pkg_dir}/bin"
             if [ "$plat" = "win32-x64" ]; then
