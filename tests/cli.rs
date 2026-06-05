@@ -5,6 +5,7 @@
 
 use assert_cmd::Command;
 use predicates::prelude::*;
+use serde_json::json;
 use std::path::Path;
 use tempfile::TempDir;
 
@@ -65,10 +66,13 @@ fn segments_command_lists_known_segments() {
 #[test]
 fn render_with_minimal_stdin_prints_at_least_dir() {
     let tmp = TempDir::new().unwrap();
-    let stdin = format!(
-        r#"{{"cwd":"{}","model":{{"display_name":"TestModel"}},"context_window":{{"remaining_percentage":80}},"session_id":"itest"}}"#,
-        tmp.path().display()
-    );
+    let stdin = json!({
+        "cwd": tmp.path().to_string_lossy(),
+        "model": {"display_name": "TestModel"},
+        "context_window": {"remaining_percentage": 80},
+        "session_id": "itest"
+    })
+    .to_string();
     ccs(&tmp)
         .arg("render")
         .write_stdin(stdin)
@@ -81,12 +85,15 @@ fn render_with_minimal_stdin_prints_at_least_dir() {
 fn render_uses_transcript_for_token_data() {
     let tmp = TempDir::new().unwrap();
     let transcript = fixture_path("three-turn-session.jsonl");
-    let stdin = format!(
-        r#"{{"cwd":"{}","model":{{"display_name":"X"}},"context_window":{{"remaining_percentage":50}},"session_id":"itest","transcript_path":"{}"}}"#,
-        tmp.path().display(),
-        transcript.display()
-    );
-    // First switch to a mode that surfaces last_turn so we can assert on it.
+    let stdin = json!({
+        "cwd": tmp.path().to_string_lossy(),
+        "model": {"display_name": "X"},
+        "context_window": {"remaining_percentage": 50},
+        "session_id": "itest",
+        "transcript_path": transcript.to_string_lossy()
+    })
+    .to_string();
+    // Switch to a mode that surfaces ctx (and last_turn) so we can assert on it.
     ccs(&tmp).args(["mode", "detailed"]).assert().success();
 
     ccs(&tmp)
@@ -94,8 +101,7 @@ fn render_uses_transcript_for_token_data() {
         .write_stdin(stdin)
         .assert()
         .success()
-        // The third (last) turn has output_tokens=20.
-        .stdout(predicate::str::contains("↓20").or(predicate::str::contains("ctx")));
+        .stdout(predicate::str::contains("ctx"));
 }
 
 #[test]
@@ -184,7 +190,10 @@ fn setup_yes_writes_statusline_and_backs_up() {
 
     let written = std::fs::read_to_string(&settings).unwrap();
     assert!(written.contains("statusLine"));
-    assert!(written.contains("ccs render") || written.contains("@cc-status-line/cli"));
+    // The command path is platform-specific (Unix: `/path/to/ccs render`,
+    // Windows: `C:\\path\\to\\ccs.exe render`). Just check the shape.
+    assert!(written.contains("\"command\""), "should write a command field");
+    assert!(written.contains("ccs"), "command should reference the ccs binary");
     assert!(
         written.contains("someUnrelated"),
         "setup must preserve other keys"
