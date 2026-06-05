@@ -7,21 +7,16 @@ use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 /// Get a stable per-file identifier for rotation detection. On Unix this
-/// is the inode; on Windows it's the NT file index. On unknown platforms
-/// we fall back to a hash of (modified time, len) — good enough to
-/// detect "the file got replaced" in practice.
+/// is the inode (cheap and rotation-proof). On Windows / unknown
+/// platforms we hash (modified time, len) — good enough to detect
+/// "the file got replaced" in practice without needing nightly APIs.
 fn file_id(meta: &Metadata) -> u64 {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
         return meta.ino();
     }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        return meta.file_index().unwrap_or(0);
-    }
-    #[cfg(not(any(unix, windows)))]
+    #[cfg(not(unix))]
     {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
