@@ -108,8 +108,15 @@ fn apply_tier(p: ModelPrice, lower_model: &str) -> ModelPrice {
 
 /// Compute USD cost for one set of token counts under a given price.
 ///
-/// `cache_read` and `cache_creation` are multiplied by the input price
-/// modifiers (0.1× and 1.25× respectively).
+/// Following ccusage and cc-switch: bills four buckets independently
+/// at their per-million rates. `cache_read` and `cache_creation` use
+/// the standard Anthropic multipliers off the input price (0.1× and
+/// 1.25× respectively).
+///
+/// We trust the transcript's `input_tokens` as fresh input
+/// (Anthropic semantics). Older Claude Code transcripts (pre-prompt-
+/// caching) often have cache_read = 0 and a large input — those are
+/// genuinely fresh-input billed turns, not a schema bug.
 pub fn cost(
     price: ModelPrice,
     input: u64,
@@ -243,6 +250,19 @@ mod tests {
         };
         let c = cost(p, 1_000, 1_000, 100_000, 0);
         assert!((c - 0.240).abs() < 1e-6, "got {}", c);
+    }
+
+    #[test]
+    fn cost_legacy_no_cache_bills_at_input_rate() {
+        // Pre-cache CC transcripts: cache_read = 0, input large.
+        // That's genuinely fresh input — bill at full input rate.
+        let p = ModelPrice {
+            input: 15.0,
+            output: 75.0,
+        };
+        // 1M input × $15/M = $15.00
+        let c = cost(p, 1_000_000, 0, 0, 0);
+        assert!((c - 15.0).abs() < 1e-6, "got {}", c);
     }
 
     #[test]
