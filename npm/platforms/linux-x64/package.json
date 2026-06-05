@@ -1,0 +1,13 @@
+{
+  "name": "@cc-status-line/linux-x64",
+  "version": "0.0.0",
+  "description": "Linux x86_64 binary for cc-status-line",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hankeGui/cc-status.git"
+  },
+  "license": "MIT",
+  "os": ["linux"],
+  "cpu": ["x64"],
+  "files": ["bin"]
+}

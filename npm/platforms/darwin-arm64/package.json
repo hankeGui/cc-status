@@ -1,0 +1,13 @@
+{
+  "name": "@cc-status-line/darwin-arm64",
+  "version": "0.0.0",
+  "description": "macOS ARM64 (Apple Silicon) binary for cc-status-line",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hankeGui/cc-status.git"
+  },
+  "license": "MIT",
+  "os": ["darwin"],
+  "cpu": ["arm64"],
+  "files": ["bin"]
+}

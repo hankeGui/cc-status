@@ -1,0 +1,13 @@
+{
+  "name": "@cc-status-line/darwin-x64",
+  "version": "0.0.0",
+  "description": "macOS x86_64 (Intel) binary for cc-status-line",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hankeGui/cc-status.git"
+  },
+  "license": "MIT",
+  "os": ["darwin"],
+  "cpu": ["x64"],
+  "files": ["bin"]
+}

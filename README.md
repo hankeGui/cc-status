@@ -26,14 +26,66 @@ cc-status answers all of these in three lines and lets you switch modes with a s
 
 ## Install
 
+Pick the easiest path for your machine:
+
+### npm / npx (recommended for Claude Code users)
+
+You already have Node.js if you use Claude Code:
+
+```sh
+# One-shot, no install
+npx -y cc-status-line --version
+
+# Or install globally so the binary is on PATH
+npm install -g cc-status-line
+ccs --version
+```
+
+Then in `~/.claude/settings.json`:
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "ccs render"
+  }
+}
+```
+
+### Homebrew (macOS / Linux)
+
+```sh
+brew install hankeGui/tap/ccs
+```
+
+### curl install script
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/hankeGui/cc-status/main/install.sh | sh
+```
+
+Installs to `~/.local/bin/ccs`. Pass `--bin-dir` or `--version` to customize.
+
+### Manual download
+
+Pick a tarball from [releases](https://github.com/hankeGui/cc-status/releases), unpack, drop `ccs` somewhere on PATH.
+
+### From source (requires Rust)
+
+```sh
+cargo install --git https://github.com/hankeGui/cc-status --locked
+```
+
+Or clone and build:
+
 ```sh
 git clone https://github.com/hankeGui/cc-status
 cd cc-status
 cargo build --release
-cp target/release/ccs ~/.local/bin/   # or anywhere on PATH
+cp target/release/ccs ~/.local/bin/
 ```
 
-Then in `~/.claude/settings.json`:
+After installing, point Claude Code at it:
 
 ```json
 {
@@ -44,7 +96,7 @@ Then in `~/.claude/settings.json`:
 }
 ```
 
-Restart Claude Code. Use absolute paths — Claude Code's status-line shell does not always inherit your login `PATH`.
+Use absolute paths — Claude Code's status-line shell does not always inherit your login `PATH`.
 
 ## Three ways to interact
 
@@ -170,6 +222,7 @@ cc-status reads `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` from the process env at render
 
 - [中文使用说明](docs/USAGE.zh.md)
 - [Architecture](docs/ARCHITECTURE.md)
+- [Releasing](docs/RELEASING.md) — distribution setup (npm, brew, GitHub Releases)
 - [CLAUDE.md](CLAUDE.md) — project-level context for Claude Code agents
 
 ## Roadmap

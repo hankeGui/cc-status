@@ -1,0 +1,13 @@
+{
+  "name": "@cc-status-line/linux-arm64",
+  "version": "0.0.0",
+  "description": "Linux ARM64 binary for cc-status-line",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hankeGui/cc-status.git"
+  },
+  "license": "MIT",
+  "os": ["linux"],
+  "cpu": ["arm64"],
+  "files": ["bin"]
+}

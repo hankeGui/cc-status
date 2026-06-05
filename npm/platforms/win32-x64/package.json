@@ -1,0 +1,13 @@
+{
+  "name": "@cc-status-line/win32-x64",
+  "version": "0.0.0",
+  "description": "Windows x86_64 binary for cc-status-line",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hankeGui/cc-status.git"
+  },
+  "license": "MIT",
+  "os": ["win32"],
+  "cpu": ["x64"],
+  "files": ["bin"]
+}

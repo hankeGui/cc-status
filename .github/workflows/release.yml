@@ -1,0 +1,238 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v0.1.1)"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-14
+            npm_platform: darwin-arm64
+            bin: ccs
+          - target: x86_64-apple-darwin
+            os: macos-13
+            npm_platform: darwin-x64
+            bin: ccs
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+            npm_platform: linux-x64
+            bin: ccs
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-22.04
+            npm_platform: linux-arm64
+            bin: ccs
+            use_cross: true
+          - target: x86_64-pc-windows-msvc
+            os: windows-2022
+            npm_platform: win32-x64
+            bin: ccs.exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build (cross)
+        if: matrix.use_cross
+        uses: houseabsolute/actions-rust-cross@v0
+        with:
+          target: ${{ matrix.target }}
+          args: --release --locked
+
+      - name: Build (cargo)
+        if: '!matrix.use_cross'
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Upload binary as artifact (for npm publish)
+        uses: actions/upload-artifact@v4
+        with:
+          name: bin-${{ matrix.npm_platform }}
+          path: target/${{ matrix.target }}/release/${{ matrix.bin }}
+          if-no-files-found: error
+
+      - name: Package for GitHub Release (Unix)
+        if: matrix.os != 'windows-2022'
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/${{ matrix.bin }} dist/${{ matrix.bin }}
+          cp README.md LICENSE dist/
+          cd dist
+          tar czf ../ccs-${{ matrix.target }}.tar.gz *
+
+      - name: Package for GitHub Release (Windows)
+        if: matrix.os == 'windows-2022'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/${{ matrix.bin }}" -Destination "dist/${{ matrix.bin }}"
+          Copy-Item README.md, LICENSE -Destination dist/
+          Compress-Archive -Path dist/* -DestinationPath "ccs-${{ matrix.target }}.zip"
+
+      - name: Upload Release archive (Unix)
+        if: matrix.os != 'windows-2022'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: ccs-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+
+      - name: Upload Release archive (Windows)
+        if: matrix.os == 'windows-2022'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: ccs-${{ matrix.target }}.zip
+          if-no-files-found: error
+
+  github-release:
+    name: GitHub Release
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Compute checksums
+        run: |
+          cd artifacts
+          shasum -a 256 * > ../checksums.txt
+          mv ../checksums.txt .
+          ls -la
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create or update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ steps.tag.outputs.tag }}
+          generate_release_notes: true
+          files: |
+            artifacts/*
+
+  npm-publish:
+    name: Publish to npm
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bin-*
+          path: bins
+          merge-multiple: false
+
+      - name: Resolve version (strip leading v)
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+          VER="${TAG#v}"
+          echo "version=$VER" >> $GITHUB_OUTPUT
+          echo "Publishing npm packages at version: $VER"
+
+      - name: Stage and publish platform packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          for plat in darwin-arm64 darwin-x64 linux-x64 linux-arm64 win32-x64; do
+            pkg_dir="npm/platforms/${plat}"
+            mkdir -p "${pkg_dir}/bin"
+            if [ "$plat" = "win32-x64" ]; then
+              cp "bins/bin-${plat}/ccs.exe" "${pkg_dir}/bin/ccs.exe"
+              chmod +x "${pkg_dir}/bin/ccs.exe" || true
+            else
+              cp "bins/bin-${plat}/ccs" "${pkg_dir}/bin/ccs"
+              chmod +x "${pkg_dir}/bin/ccs"
+            fi
+            # Bump version in this sub-package
+            node -e "const fs=require('fs');const f='${pkg_dir}/package.json';const j=JSON.parse(fs.readFileSync(f));j.version=process.env.VERSION;fs.writeFileSync(f,JSON.stringify(j,null,2)+'\\n')"
+            (cd "${pkg_dir}" && npm publish --access public --provenance)
+          done
+
+      - name: Stage and publish main package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          pkg_dir="npm/cc-status-line"
+          # Bump main version + pin optionalDependencies to the same version
+          node -e "
+            const fs=require('fs');
+            const f='${pkg_dir}/package.json';
+            const j=JSON.parse(fs.readFileSync(f));
+            j.version=process.env.VERSION;
+            for (const k of Object.keys(j.optionalDependencies||{})) {
+              j.optionalDependencies[k]=process.env.VERSION;
+            }
+            fs.writeFileSync(f,JSON.stringify(j,null,2)+'\\n');
+          "
+          # Copy top-level README into the package so npm shows it
+          cp README.md "${pkg_dir}/README.md.full" || true
+          (cd "${pkg_dir}" && npm publish --access public --provenance)
+
+  homebrew-bump:
+    name: Bump Homebrew tap
+    needs: github-release
+    runs-on: ubuntu-22.04
+    if: ${{ vars.HOMEBREW_TAP_REPO != '' }}
+    steps:
+      - name: Bump formula in tap
+        uses: mislav/bump-homebrew-formula-action@v3
+        with:
+          formula-name: ccs
+          homebrew-tap: ${{ vars.HOMEBREW_TAP_REPO }}
+          download-url: https://github.com/hankeGui/cc-status/archive/refs/tags/${{ github.ref_name }}.tar.gz
+        env:
+          COMMITTER_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
