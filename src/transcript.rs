@@ -2,10 +2,39 @@ use crate::cache::SessionCache;
 use anyhow::Result;
 use chrono::DateTime;
 use serde_json::Value;
-use std::fs::File;
+use std::fs::{File, Metadata};
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
-use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
+
+/// Get a stable per-file identifier for rotation detection. On Unix this
+/// is the inode; on Windows it's the NT file index. On unknown platforms
+/// we fall back to a hash of (modified time, len) — good enough to
+/// detect "the file got replaced" in practice.
+fn file_id(meta: &Metadata) -> u64 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        return meta.ino();
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        return meta.file_index().unwrap_or(0);
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut h = DefaultHasher::new();
+        if let Ok(t) = meta.modified() {
+            if let Ok(d) = t.duration_since(std::time::UNIX_EPOCH) {
+                d.as_nanos().hash(&mut h);
+            }
+        }
+        meta.len().hash(&mut h);
+        h.finish()
+    }
+}
 
 /// Locate the most recently modified transcript JSONL for `cwd`.
 ///
@@ -44,7 +73,7 @@ pub fn find_latest_for_cwd(cwd: &str) -> Option<PathBuf> {
 /// blocks (`type: "tool_use"`) tell us which Skill/MCP was invoked.
 pub fn update(path: &Path, cache: &mut SessionCache) -> Result<()> {
     let Ok(meta) = std::fs::metadata(path) else { return Ok(()) };
-    let inode = meta.ino();
+    let inode = file_id(&meta);
     let size = meta.len();
 
     if inode != cache.inode || size < cache.file_offset {
