@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]
@@ -35,6 +35,13 @@ pub struct SessionCache {
     /// don't double-count the same assistant message.
     #[serde(default)]
     pub seen: HashMap<String, SeenMessage>,
+    /// Per-tool-call dedupe by tool_use `id` (toolu_*). When the same
+    /// assistant message is replayed across multiple JSONL entries
+    /// (sidechain or streaming), the same tool_use block can show up
+    /// more than once; without this set we'd over-count Skill / MCP
+    /// calls. Token totals use a different dedupe path; see `seen`.
+    #[serde(default)]
+    pub seen_tools: HashSet<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]

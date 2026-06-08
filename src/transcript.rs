@@ -132,9 +132,19 @@ fn process_entry(v: &Value, cache: &mut SessionCache) {
                 .unwrap_or(0);
 
             if input + output + cache_read + cache_creation > 0 {
-                // Dedupe: same message.id can appear multiple times
-                // (streaming partial / final). We keep totals for the
-                // largest version, mirroring ccusage's behavior.
+                // Dedupe TOKEN COUNTS by (message.id, requestId): the
+                // same assistant message can be written multiple times
+                // (streaming partial → final, or sidechain replay), and
+                // each copy carries the same `usage` object — naively
+                // summing them double-counts. Mirrors ccusage's
+                // adapter/claude::should_replace_deduped_entry.
+                //
+                // **Important**: this dedupe applies to TOKEN totals
+                // only. tool_use blocks have their own `id` (toolu_*)
+                // and are dedupe'd separately below — otherwise the
+                // `return` here would skip a Skill / MCP call that
+                // appeared in a later copy of the same message but
+                // not the first one we saw.
                 let dedupe_key = v
                     .pointer("/message/id")
                     .and_then(|x| x.as_str())
@@ -151,6 +161,7 @@ fn process_entry(v: &Value, cache: &mut SessionCache) {
                 let mut credited_output = output;
                 let mut credited_cache_read = cache_read;
                 let mut credited_cache_creation = cache_creation;
+                let mut skip_tokens = false;
 
                 if let Some(key) = &dedupe_key {
                     let new_total = input + output + cache_read + cache_creation;
@@ -158,55 +169,63 @@ fn process_entry(v: &Value, cache: &mut SessionCache) {
                         let prev_total =
                             prev.input + prev.output + prev.cache_read + prev.cache_creation;
                         if new_total <= prev_total {
-                            // skip this duplicate (existing is at least as complete)
-                            return;
+                            // existing copy is at least as complete — skip token credit
+                            // (but still process tool_use blocks below).
+                            skip_tokens = true;
+                        } else {
+                            // upgrade: subtract old contribution, add new
+                            credited_input = input.saturating_sub(prev.input);
+                            credited_output = output.saturating_sub(prev.output);
+                            credited_cache_read = cache_read.saturating_sub(prev.cache_read);
+                            credited_cache_creation =
+                                cache_creation.saturating_sub(prev.cache_creation);
                         }
-                        // upgrade: subtract old, add new
-                        credited_input = input.saturating_sub(prev.input);
-                        credited_output = output.saturating_sub(prev.output);
-                        credited_cache_read = cache_read.saturating_sub(prev.cache_read);
-                        credited_cache_creation =
-                            cache_creation.saturating_sub(prev.cache_creation);
                     }
                 }
 
-                cache.last_turn_input = input;
-                cache.last_turn_output = output;
-                cache.last_turn_cache_read = cache_read;
-                cache.last_turn_cache_creation = cache_creation;
+                if !skip_tokens {
+                    cache.last_turn_input = input;
+                    cache.last_turn_output = output;
+                    cache.last_turn_cache_read = cache_read;
+                    cache.last_turn_cache_creation = cache_creation;
 
-                cache.total_input += credited_input;
-                cache.total_output += credited_output;
-                cache.total_cache_read += credited_cache_read;
-                cache.total_cache_creation += credited_cache_creation;
+                    cache.total_input += credited_input;
+                    cache.total_output += credited_output;
+                    cache.total_cache_read += credited_cache_read;
+                    cache.total_cache_creation += credited_cache_creation;
 
-                if let Some(key) = dedupe_key {
-                    cache.seen.insert(
-                        key,
-                        crate::cache::SeenMessage {
-                            input,
-                            output,
-                            cache_read,
-                            cache_creation,
-                        },
-                    );
-                }
+                    if let Some(key) = dedupe_key {
+                        cache.seen.insert(
+                            key,
+                            crate::cache::SeenMessage {
+                                input,
+                                output,
+                                cache_read,
+                                cache_creation,
+                            },
+                        );
+                    }
 
-                if let Some(ts) = v.get("timestamp").and_then(|x| x.as_str()) {
-                    if let Ok(dt) = DateTime::parse_from_rfc3339(ts) {
-                        let ms = dt.timestamp_millis();
-                        if cache.first_turn_ms.is_none() {
-                            cache.first_turn_ms = Some(ms);
-                        }
-                        cache.last_turn_ms = Some(ms);
-                        if cache_read > 0 {
-                            cache.last_cache_read_ms = Some(ms);
+                    if let Some(ts) = v.get("timestamp").and_then(|x| x.as_str()) {
+                        if let Ok(dt) = DateTime::parse_from_rfc3339(ts) {
+                            let ms = dt.timestamp_millis();
+                            if cache.first_turn_ms.is_none() {
+                                cache.first_turn_ms = Some(ms);
+                            }
+                            cache.last_turn_ms = Some(ms);
+                            if cache_read > 0 {
+                                cache.last_cache_read_ms = Some(ms);
+                            }
                         }
                     }
                 }
             }
         }
 
+        // tool_use blocks always processed, regardless of token-level
+        // dedupe. Dedupe at the per-block level using the block's own
+        // `id` (toolu_*) so the same call isn't counted twice if the
+        // entry is replayed.
         if let Some(content) = v.pointer("/message/content").and_then(|x| x.as_array()) {
             for block in content {
                 let block_type = block.get("type").and_then(|x| x.as_str()).unwrap_or("");
@@ -216,6 +235,13 @@ fn process_entry(v: &Value, cache: &mut SessionCache) {
                 let name = block.get("name").and_then(|x| x.as_str()).unwrap_or("");
                 if name.is_empty() {
                     continue;
+                }
+                // Per-call dedupe: each tool_use has a unique id (toolu_*).
+                if let Some(tool_id) = block.get("id").and_then(|x| x.as_str()) {
+                    if !cache.seen_tools.insert(tool_id.to_string()) {
+                        // already counted this exact tool call
+                        continue;
+                    }
                 }
                 if name == "Skill" {
                     let skill_name = block
