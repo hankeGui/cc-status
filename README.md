@@ -1,9 +1,14 @@
 # cc-status
 
-> Multi-line, mode-switchable status line for [Claude Code](https://docs.claude.com/en/docs/claude-code) — written in Rust, with optional daemon, ~140ms cold render.
+> Multi-line, mode-switchable status line for [Claude Code](https://docs.claude.com/en/docs/claude-code) — written in Rust. Token cost tracking, prompt-cache TTL, hit rate, burn rate, Skill/MCP usage, daemon mode, all in one binary.
+
+[![npm](https://img.shields.io/npm/v/@cc-status-line/cli?label=npm&color=brightgreen)](https://www.npmjs.com/package/@cc-status-line/cli)
+[![GitHub release](https://img.shields.io/github/v/release/hankeGui/cc-status?display_name=tag&sort=semver)](https://github.com/hankeGui/cc-status/releases)
+[![License](https://img.shields.io/github/license/hankeGui/cc-status)](LICENSE)
 
 🌐 **Site**: <https://hankegui.github.io/cc-status>
 🐙 **Source**: <https://github.com/hankeGui/cc-status>
+📦 **npm**: `npm install -g @cc-status-line/cli`
 
 ```
 ~/hanke-dev/cc-status main  Claude Opus 4.7  ctx 86% █████▏  154.6k/950k
@@ -22,12 +27,26 @@ skills: jira×3 wiki×1   mcp: github×2
 Most Claude Code status lines stop at "model name + ctx percentage." That hides what actually drives cost and behavior:
 
 - How many tokens did the **last turn** burn, and how many were a cache hit (10× cheaper)?
-- Is the **prompt cache** about to expire (5-min TTL)?
+- Is the **prompt cache** about to expire (5-min TTL) — and how much will the next turn cost if it does?
 - What's my **session-wide hit rate** — and how fast am I burning tokens?
 - Which **Skills / MCP servers** has this session called?
 - On a 1M-context model, is my percentage actually computed against 1M, or am I about to be auto-compacted at 200k?
+- **What did this session actually cost in USD** — and how does today / this week compare?
 
 cc-status answers all of these in three lines and lets you switch modes with a single command.
+
+## Highlights
+
+- **7 built-in modes** (`compact` / `minimal` / `detailed` / `cost` / `tokens` / `tools` / `debug`) plus user-defined modes via `ccs mode add` / `append` / `edit`.
+- **17 segments** ranging from `{dir}` and `{git}` to `{cost_today}` / `{burn}` / `{cache_ttl}`. Mix and match.
+- **Per-model USD pricing** with built-in defaults for Opus / Sonnet / Haiku 4.x and a 1M-context tier multiplier. Override per model in `config.toml`.
+- **`ccs cost`** prints a multi-day ASCII dashboard with per-day bars, per-model breakdowns, and `--debug` per-file reconciliation when numbers don't match another tool.
+- **`ccs status`** is a self-explanatory dashboard for the current session — every number labeled, every unit annotated.
+- **`ccs setup`** writes the `statusLine` block to `~/.claude/settings.json` for you (with backup), so users don't have to hand-edit JSON.
+- **Optional Unix-socket daemon** for sub-millisecond renders on slow git repos. `ccs render` falls back to inline rendering if the daemon isn't running.
+- **Streaming-aware token accounting**: matches `ccusage` and `cc-switch`'s `(message.id, requestId)` dedupe so we don't double-count partial / final stream events.
+- **Local-time day buckets** matching what the Anthropic console shows.
+- **Fault-isolated rendering**: a panicking or stuck segment becomes empty space, never blanks the whole status line.
 
 ## Install
 
@@ -279,14 +298,28 @@ file; subsequent renders only read newly-appended bytes.
 > **Caveat**: today/7d cost relies on the model id Claude Code writes
 > into the transcript (`message.model`), which is the canonical id
 > like `claude-opus-4-7` without the `[1m]` suffix. If you run on a
-> 1M-context tier, today/7d under-counts by ~50% unless you add a
-> matching `[pricing.opus]` override that bakes the doubled price in.
+> 1M-context tier, today/7d under-counts unless you add a matching
+> `[pricing.opus]` override that bakes the doubled price in.
 
+### Reconciling against another tool
 
+Numbers off vs ccusage / cc-switch / your Anthropic invoice? Run:
 
-- **Render latency**: ~20 ms (mostly forking `git` for status). Well under Claude Code's 300 ms status-line timeout.
-- **Transcript parsing**: incremental — a per-session JSON cache stores the file offset and aggregated counters. Parsing 1 GB of transcript on the first run is the worst case; every subsequent render reads only newly-appended bytes.
-- **No daemon, no socket, no IPC**: a single binary, invoked anew each render. State persists via `$XDG_CACHE_HOME/cc-status/session-*.json`.
+```sh
+ccs cost --days 1 --debug
+```
+
+It prints every transcript file that contributed to the window, sorted
+by cost — with raw entry count → unique-after-dedupe count, % duplicated,
+date-window misses, the four token buckets, and the model. Lets you
+pinpoint exactly where the gap is in seconds.
+
+## Performance
+
+- **Render latency**: ~20 ms inline (mostly forking `git`); ~2 ms via the optional daemon. Well under Claude Code's 300 ms status-line timeout either way.
+- **Transcript parsing**: incremental — a per-session JSON cache stores the file offset and aggregated counters. First-run scan is the worst case; subsequent renders only read newly-appended bytes.
+- **Cross-session rollup**: `~/Library/Caches/dev.hanke.cc-status/rollup.json` holds per-day, per-model token totals + a per-message dedupe set. Loaded only when the active mode references `{cost_today}` / `{cost_week}` / `{cost}`.
+- **Fault isolation**: each segment is wrapped in `catch_unwind`; the git helper has a 150 ms hard timeout. A bad segment becomes `""`; the rest of the line still renders.
 
 ## Documentation
 
@@ -297,15 +330,28 @@ file; subsequent renders only read newly-appended bytes.
 
 ## Roadmap
 
+Done in 0.3.x:
+
 - [x] Daemon mode (Unix socket) for sub-ms cold start
-- [x] Cost segment with per-model pricing
-- [x] Cross-session cost dashboard (`ccs cost`)
-- [x] Auto-update (`ccs upgrade`)
-- [x] Shell completions
-- [ ] Per-session colors / titles (parallel CC instances)
+- [x] Cost segments (`{cost_last}` / `{cost_session}` / `{cost_today}` / `{cost_week}` / `{cost}`)
+- [x] Per-model pricing with built-in Opus / Sonnet / Haiku rates and 1M-tier multiplier
+- [x] Cross-session cost dashboard (`ccs cost --days N`)
+- [x] `ccs cost --debug` per-file reconciliation
+- [x] Streaming `(message.id, requestId)` dedupe matching ccusage / cc-switch
+- [x] Local-time day buckets
+- [x] Auto-update (`ccs upgrade`) detecting npm / curl / brew / cargo install
+- [x] Shell completions (`ccs completions <shell>`)
+- [x] Fault-isolated segment rendering + git timeout
+- [x] `ccs setup` for one-shot `~/.claude/settings.json` wiring
+- [x] GitHub Pages site
+
+Still on the list:
+
+- [ ] Re-enable Windows builds (rollup file-rotation detection needs a robust signal there)
+- [ ] Per-session colors / titles for parallel CC instances
 - [ ] Pace-aware quota burn warning
 - [ ] Plugin segments (custom shell commands)
-- [ ] Re-enable Windows builds
+- [ ] Homebrew tap published
 
 ## License
 
