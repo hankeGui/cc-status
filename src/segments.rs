@@ -718,10 +718,10 @@ mod tests {
         assert_eq!(format_duration(1), "1s");
         assert_eq!(format_duration(59), "59s");
         assert_eq!(format_duration(60), "1m");
-        assert_eq!(format_duration(720), "12m");        // 12 minutes
-        assert_eq!(format_duration(3599), "59m");       // < 1h
+        assert_eq!(format_duration(720), "12m"); // 12 minutes
+        assert_eq!(format_duration(3599), "59m"); // < 1h
         assert_eq!(format_duration(3600), "1h00m");
-        assert_eq!(format_duration(4980), "1h23m");     // 1h23m
+        assert_eq!(format_duration(4980), "1h23m"); // 1h23m
         assert_eq!(format_duration(86_399), "23h59m");
         assert_eq!(format_duration(86_400), "1d0h");
         assert_eq!(format_duration(183_600), "2d3h");
@@ -730,7 +730,7 @@ mod tests {
     #[test]
     fn session_age_renders_empty_without_first_turn() {
         let stdin = serde_json::Value::Null;
-        let cache = SessionCache::default();      // first_turn_ms = None
+        let cache = SessionCache::default(); // first_turn_ms = None
         let cfg = Config::default();
         let ctx = ctx_for_test(&stdin, &cache, &cfg);
         assert_eq!(seg_session_age(&ctx), "");
@@ -748,7 +748,10 @@ mod tests {
         let ctx = ctx_for_test(&stdin, &cache, &cfg);
         let s = seg_session_age(&ctx);
         // Strip ANSI for a clean assertion.
-        let stripped: String = s.chars().filter(|c| !c.is_control() && *c != 'm' || *c == 'm').collect();
+        let stripped: String = s
+            .chars()
+            .filter(|c| !c.is_control() && *c != 'm' || *c == 'm')
+            .collect();
         assert!(
             stripped.contains("12m") || stripped.contains("11m"),
             "expected ~12m, got: {:?}",
@@ -761,14 +764,26 @@ mod tests {
     #[test]
     fn cleanup_id_strips_only_anthropic_self_prefixes() {
         // Anthropic-self prefixes are noise → strip them.
-        assert_eq!(cleanup_id("anthropic--claude-opus-latest"), "claude-opus-latest");
+        assert_eq!(
+            cleanup_id("anthropic--claude-opus-latest"),
+            "claude-opus-latest"
+        );
         assert_eq!(cleanup_id("anthropic/claude-opus-4-7"), "claude-opus-4-7");
         // Deployment prefixes are *information* — keep them so users
         // know they're hitting Bedrock / Vertex / OpenRouter.
-        assert_eq!(cleanup_id("bedrock/anthropic.claude-opus-4"), "bedrock/anthropic.claude-opus-4");
-        assert_eq!(cleanup_id("vertex_ai/claude-opus-4-7"), "vertex_ai/claude-opus-4-7");
+        assert_eq!(
+            cleanup_id("bedrock/anthropic.claude-opus-4"),
+            "bedrock/anthropic.claude-opus-4"
+        );
+        assert_eq!(
+            cleanup_id("vertex_ai/claude-opus-4-7"),
+            "vertex_ai/claude-opus-4-7"
+        );
         // Unknown id passes through unchanged.
-        assert_eq!(cleanup_id("gpt-4-turbo-via-claude-proxy"), "gpt-4-turbo-via-claude-proxy");
+        assert_eq!(
+            cleanup_id("gpt-4-turbo-via-claude-proxy"),
+            "gpt-4-turbo-via-claude-proxy"
+        );
     }
 
     #[test]
@@ -798,7 +813,10 @@ mod tests {
             "claude-opus-4-7 [1m]"
         );
         // No tier → no extra suffix.
-        assert_eq!(finalize_model_label("claude-opus-4-7", None), "claude-opus-4-7");
+        assert_eq!(
+            finalize_model_label("claude-opus-4-7", None),
+            "claude-opus-4-7"
+        );
     }
 
     #[test]
@@ -884,13 +902,22 @@ mod tests {
     #[test]
     fn sanitize_plugin_output_collapses_whitespace_and_clips() {
         assert_eq!(sanitize_plugin_output("hello\nworld"), "hello world");
-        assert_eq!(sanitize_plugin_output("  spaced  out\t\tline  "), "spaced out line");
+        assert_eq!(
+            sanitize_plugin_output("  spaced  out\t\tline  "),
+            "spaced out line"
+        );
         // ANSI ESC kept (plugins may emit colors), other control chars stripped
-        assert_eq!(sanitize_plugin_output("\x1b[31mred\x1b[0m"), "\x1b[31mred\x1b[0m");
+        assert_eq!(
+            sanitize_plugin_output("\x1b[31mred\x1b[0m"),
+            "\x1b[31mred\x1b[0m"
+        );
         assert_eq!(sanitize_plugin_output("a\x07b"), "ab");
         // length cap (chars, not bytes)
         let long: String = "x".repeat(200);
-        assert_eq!(sanitize_plugin_output(&long).chars().count(), super::PLUGIN_MAX_DISPLAY);
+        assert_eq!(
+            sanitize_plugin_output(&long).chars().count(),
+            super::PLUGIN_MAX_DISPLAY
+        );
     }
 
     #[cfg(unix)]

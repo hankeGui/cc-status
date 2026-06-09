@@ -534,8 +534,7 @@ fn plugin_list_in_empty_dir_prints_quickstart() {
         .assert()
         .success()
         .stdout(
-            predicate::str::contains("Quickstart")
-                .and(predicate::str::contains("ccs plugin new")),
+            predicate::str::contains("Quickstart").and(predicate::str::contains("ccs plugin new")),
         );
 }
 
@@ -561,7 +560,12 @@ fn plugin_new_creates_executable_sh_file() {
     {
         use std::os::unix::fs::PermissionsExt;
         let mode = std::fs::metadata(&path).unwrap().permissions().mode();
-        assert_eq!(mode & 0o111, 0o111, "file must be executable, got {:o}", mode);
+        assert_eq!(
+            mode & 0o111,
+            0o111,
+            "file must be executable, got {:o}",
+            mode
+        );
     }
 }
 
@@ -581,7 +585,10 @@ fn plugin_new_python_lang_writes_python_template() {
 #[test]
 fn plugin_new_refuses_existing_without_force() {
     let tmp = TempDir::new().unwrap();
-    ccs(&tmp).args(["plugin", "new", "twice"]).assert().success();
+    ccs(&tmp)
+        .args(["plugin", "new", "twice"])
+        .assert()
+        .success();
     ccs(&tmp)
         .args(["plugin", "new", "twice"])
         .assert()
@@ -611,7 +618,10 @@ fn plugin_new_rejects_invalid_names() {
 #[test]
 fn plugin_list_marks_executable_status() {
     let tmp = TempDir::new().unwrap();
-    ccs(&tmp).args(["plugin", "new", "shown"]).assert().success();
+    ccs(&tmp)
+        .args(["plugin", "new", "shown"])
+        .assert()
+        .success();
     ccs(&tmp)
         .args(["plugin", "list"])
         .assert()
@@ -623,7 +633,10 @@ fn plugin_list_marks_executable_status() {
 #[test]
 fn plugin_run_executes_and_reports_stdout() {
     let tmp = TempDir::new().unwrap();
-    ccs(&tmp).args(["plugin", "new", "echoer"]).assert().success();
+    ccs(&tmp)
+        .args(["plugin", "new", "echoer"])
+        .assert()
+        .success();
     // Replace template body with a deterministic line we can grep.
     let path = ccs_plugin_path(&tmp).join("echoer");
     std::fs::write(&path, "#!/bin/sh\nprintf 'PLUGIN_OK_MARK'\n").unwrap();
@@ -669,7 +682,10 @@ fn plugin_doctor_reports_orphan_plugin() {
     // A plugin file that exists on disk but isn't referenced by any
     // mode should be flagged as a warning, not a failure.
     let tmp = TempDir::new().unwrap();
-    ccs(&tmp).args(["plugin", "new", "lonely"]).assert().success();
+    ccs(&tmp)
+        .args(["plugin", "new", "lonely"])
+        .assert()
+        .success();
     ccs(&tmp)
         .args(["plugin", "doctor"])
         .assert()
@@ -684,7 +700,10 @@ fn plugin_doctor_reports_orphan_plugin() {
 #[test]
 fn plugin_doctor_credits_referenced_plugin() {
     let tmp = TempDir::new().unwrap();
-    ccs(&tmp).args(["plugin", "new", "wired"]).assert().success();
+    ccs(&tmp)
+        .args(["plugin", "new", "wired"])
+        .assert()
+        .success();
     ccs(&tmp)
         .args(["mode", "append", "plugin:wired"])
         .assert()
@@ -752,7 +771,10 @@ fn plugin_run_warm_avoids_cold_start_warning() {
     // "would TIME OUT" suffix. We assert the absence rather than a
     // strict timing bound (CI machines vary wildly).
     let tmp = TempDir::new().unwrap();
-    ccs(&tmp).args(["plugin", "new", "warmable"]).assert().success();
+    ccs(&tmp)
+        .args(["plugin", "new", "warmable"])
+        .assert()
+        .success();
 
     // Touch the plugin once via --warm; the second run inside the same
     // ccs invocation should not flag a cold-start timeout.

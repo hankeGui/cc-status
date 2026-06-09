@@ -133,7 +133,12 @@ fn list() -> Result<()> {
     let dir = plugins_dir()?;
     println!("{B}cc-status plugins{R}", B = BOLD, R = RESET);
     println!("{}{}{}", DIM, "─".repeat(50), RESET);
-    println!("  {DIM}directory:{R} {}", dir.display(), DIM = DIM, R = RESET);
+    println!(
+        "  {DIM}directory:{R} {}",
+        dir.display(),
+        DIM = DIM,
+        R = RESET
+    );
     println!();
 
     if !dir.exists() {
@@ -243,11 +248,7 @@ fn new(name: &str, lang: Lang, force: bool) -> Result<()> {
     };
     println!(
         "{}✓{} wrote {}plugin{} ({}, executable)",
-        GREEN,
-        RESET,
-        BOLD,
-        RESET,
-        lang_label
+        GREEN, RESET, BOLD, RESET, lang_label
     );
     println!("  {}{}{}", DIM, path.display(), RESET);
     println!();
@@ -266,12 +267,7 @@ fn new(name: &str, lang: Lang, force: bool) -> Result<()> {
         R = RESET,
         DIM = DIM,
     );
-    println!(
-        "  {C}$EDITOR {}{R}",
-        path.display(),
-        C = CYAN,
-        R = RESET
-    );
+    println!("  {C}$EDITOR {}{R}", path.display(), C = CYAN, R = RESET);
     println!();
     println!("{B}Contract{R}", B = BOLD, R = RESET);
     println!(
@@ -324,7 +320,12 @@ fn run_debug(name: &str, warm: bool) -> Result<()> {
 
     println!("{B}Plugin debug · {}{R}", name, B = BOLD, R = RESET);
     println!("{}{}{}", DIM, "─".repeat(50), RESET);
-    println!("  {DIM}path:{R}    {}", path.display(), DIM = DIM, R = RESET);
+    println!(
+        "  {DIM}path:{R}    {}",
+        path.display(),
+        DIM = DIM,
+        R = RESET
+    );
     println!(
         "  {DIM}stdin:{R}   (mock CC JSON, {} bytes)",
         stdin_payload.len(),
@@ -397,11 +398,7 @@ fn run_debug(name: &str, warm: bool) -> Result<()> {
 
             // Show what the status line will actually display.
             let sanitized = crate::segments::sanitize_plugin_output_for_debug(&stdout);
-            println!(
-                "{B}As shown in the status line{R}",
-                B = BOLD,
-                R = RESET
-            );
+            println!("{B}As shown in the status line{R}", B = BOLD, R = RESET);
             if sanitized.is_empty() {
                 println!(
                     "  {DIM}(empty — segment will render as \"\"){R}",
@@ -445,8 +442,7 @@ fn exec_capture(path: &Path, stdin_payload: &str) -> Result<Capture> {
     // Hard cap: 5s in debug mode (vs 250ms at render time) so users see
     // what their slow plugin would have produced — render-time will kill
     // it, but for debugging it's nice to see the eventual output.
-    let deadline =
-        Instant::now() + std::time::Duration::from_secs(5);
+    let deadline = Instant::now() + std::time::Duration::from_secs(5);
     loop {
         match child.try_wait()? {
             Some(_) => break,
@@ -682,12 +678,7 @@ fn doctor() -> Result<()> {
 
     // Compute alignment column for plugin names so the inline status
     // glyph + label line up regardless of name length.
-    let name_w = results
-        .iter()
-        .map(|r| r.name.len())
-        .max()
-        .unwrap_or(8)
-        + 2;
+    let name_w = results.iter().map(|r| r.name.len()).max().unwrap_or(8) + 2;
 
     for r in &results {
         println!(
@@ -706,8 +697,14 @@ fn doctor() -> Result<()> {
 
     // Summary footer.
     let n_total = results.len();
-    let n_fail = results.iter().filter(|r| r.severity == Severity::Fail).count();
-    let n_warn = results.iter().filter(|r| r.severity == Severity::Warn).count();
+    let n_fail = results
+        .iter()
+        .filter(|r| r.severity == Severity::Fail)
+        .count();
+    let n_warn = results
+        .iter()
+        .filter(|r| r.severity == Severity::Warn)
+        .count();
     let n_ok = n_total - n_fail - n_warn;
 
     println!();
@@ -740,8 +737,7 @@ fn doctor() -> Result<()> {
 /// that exist on disk but aren't wired into any mode (orphans).
 fn collect_mode_references() -> Result<std::collections::HashMap<String, Vec<String>>> {
     let cfg = config::load()?;
-    let mut refs: std::collections::HashMap<String, Vec<String>> =
-        std::collections::HashMap::new();
+    let mut refs: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
     for (mode_name, mode) in &cfg.modes {
         for line in &mode.lines {
             // Walk `{...}` placeholders and pick out `plugin:NAME` ones.
@@ -845,7 +841,11 @@ fn check_plugin(
                     notes.push("empty stdout — segment will render as \"\"".into());
                 } else {
                     let preview: String = trimmed.chars().take(48).collect();
-                    let ellipsis = if trimmed.chars().count() > 48 { "…" } else { "" };
+                    let ellipsis = if trimmed.chars().count() > 48 {
+                        "…"
+                    } else {
+                        ""
+                    };
                     notes.push(format!("stdout: {}{}", preview, ellipsis));
                 }
             }
@@ -1012,7 +1012,9 @@ mod tests {
         let r = check_plugin("good", &path, &mock, &orphan_refs);
         assert_eq!(r.severity, Severity::Warn);
         assert!(
-            r.notes.iter().any(|n| n.contains("not referenced by any mode")),
+            r.notes
+                .iter()
+                .any(|n| n.contains("not referenced by any mode")),
             "orphan check missing from notes: {:?}",
             r.notes
         );
@@ -1030,7 +1032,9 @@ mod tests {
             r.notes
         );
         assert!(
-            r.notes.iter().any(|n| n.contains("referenced by mode(s): compact")),
+            r.notes
+                .iter()
+                .any(|n| n.contains("referenced by mode(s): compact")),
             "wired note missing: {:?}",
             r.notes
         );

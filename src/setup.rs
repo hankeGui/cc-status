@@ -339,7 +339,12 @@ fn uninstall_skill(claude_dir: &std::path::Path) -> Result<()> {
     }
     std::fs::remove_dir_all(&skill_dir)
         .with_context(|| format!("remove {}", skill_dir.display()))?;
-    println!("{}✓{} skill removed from {}", GREEN, RESET, skill_dir.display());
+    println!(
+        "{}✓{} skill removed from {}",
+        GREEN,
+        RESET,
+        skill_dir.display()
+    );
     Ok(())
 }
 

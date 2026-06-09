@@ -334,7 +334,12 @@ pub fn list_modes() -> Result<()> {
         println!("{}", header);
 
         for line in &mode.lines {
-            println!("    {DIM}template{R}  {DIM}{}{R}", line, DIM = DIM, R = RESET);
+            println!(
+                "    {DIM}template{R}  {DIM}{}{R}",
+                line,
+                DIM = DIM,
+                R = RESET
+            );
             // Render the line with mock data so the user sees what each
             // template actually produces. render_line collapses
             // whitespace around empty segments — if a segment legitimately
@@ -720,7 +725,11 @@ mod tests {
         for name in &[
             "balanced", "compact", "minimal", "detailed", "cost", "tokens", "tools", "debug",
         ] {
-            assert!(cfg.modes.contains_key(*name), "missing default mode: {}", name);
+            assert!(
+                cfg.modes.contains_key(*name),
+                "missing default mode: {}",
+                name
+            );
         }
         assert_eq!(cfg.current_mode, "balanced");
     }

@@ -45,9 +45,7 @@ pub fn run(args: Args) -> Result<()> {
     let bind_port = args.port.unwrap_or(0);
     let listener = TcpListener::bind(("127.0.0.1", bind_port))
         .with_context(|| format!("bind 127.0.0.1:{}", bind_port))?;
-    listener
-        .set_nonblocking(false)
-        .ok();
+    listener.set_nonblocking(false).ok();
     let local = listener.local_addr()?;
     let port = local.port();
     let token = mint_token();
@@ -64,7 +62,9 @@ pub fn run(args: Args) -> Result<()> {
     // buffer stderr aggressively when the launching process is itself
     // backgrounded; a tail-able file is the most reliable handoff.
     if let Ok(home) = std::env::var("HOME") {
-        let cache = std::path::PathBuf::from(home).join(".cache").join("cc-status");
+        let cache = std::path::PathBuf::from(home)
+            .join(".cache")
+            .join("cc-status");
         if std::fs::create_dir_all(&cache).is_ok() {
             let _ = std::fs::write(cache.join("config-edit.url"), &url);
         }
@@ -160,10 +160,7 @@ fn handle_client(
     };
 
     // --- Host header allowlist (defense against DNS rebinding) -----
-    let expected_hosts = [
-        format!("127.0.0.1:{}", port),
-        format!("localhost:{}", port),
-    ];
+    let expected_hosts = [format!("127.0.0.1:{}", port), format!("localhost:{}", port)];
     let host = req.headers.get("host").map(String::as_str).unwrap_or("");
     if !expected_hosts.iter().any(|h| h == host) {
         return write_response(
@@ -197,7 +194,12 @@ fn handle_client(
     }
 
     match (req.method.as_str(), req.path_only().as_str()) {
-        ("GET", "/") => write_response(&mut stream, 200, "text/html; charset=utf-8", HTML_BODY.as_bytes()),
+        ("GET", "/") => write_response(
+            &mut stream,
+            200,
+            "text/html; charset=utf-8",
+            HTML_BODY.as_bytes(),
+        ),
         ("GET", "/api/state") => {
             let body = build_state()?;
             write_response(&mut stream, 200, "application/json", body.as_bytes())
@@ -354,12 +356,7 @@ fn build_state() -> Result<String> {
     let modes_json: serde_json::Map<String, Value> = cfg
         .modes
         .iter()
-        .map(|(name, mode)| {
-            (
-                name.clone(),
-                json!({ "lines": mode.lines }),
-            )
-        })
+        .map(|(name, mode)| (name.clone(), json!({ "lines": mode.lines })))
         .collect();
 
     let segments_json: Vec<Value> = crate::segments_meta::SEGMENTS
@@ -468,7 +465,10 @@ fn handle_save(body: &[u8]) -> Result<()> {
         if name.is_empty() {
             bail!("mode name cannot be empty");
         }
-        if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        if !name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
             bail!(
                 "mode name '{}' has invalid chars (use letters, digits, '-', '_')",
                 name
@@ -634,7 +634,9 @@ mod tests {
         // output is non-empty and uses the expected alphabet.
         let s = base64_url(&[0u8, 1, 2, 3, 4, 5, 6, 7]);
         assert!(!s.is_empty());
-        assert!(s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+        assert!(s
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
     }
 
     #[test]
@@ -685,7 +687,11 @@ mod tests {
         let r = handle_save(body.as_bytes());
         assert!(r.is_err());
         let msg = format!("{}", r.unwrap_err());
-        assert!(msg.contains("invalid"), "expected invalid name error, got: {}", msg);
+        assert!(
+            msg.contains("invalid"),
+            "expected invalid name error, got: {}",
+            msg
+        );
     }
 
     #[test]
