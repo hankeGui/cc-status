@@ -264,6 +264,39 @@ fn decide_skill_install(args: &Args) -> Result<bool> {
     Ok(s.is_empty() || s.eq_ignore_ascii_case("y"))
 }
 
+/// Re-write the skill files at `~/.claude/skills/cc-status/` from the
+/// binary's bundled copies, *only* if the user already had the skill
+/// installed. Used by `ccs upgrade` so SKILL.md stays in sync with
+/// the installed binary's command set.
+///
+/// Returns `Ok(true)` if a refresh happened, `Ok(false)` if there was
+/// nothing to refresh (skill not installed), or `Err` on I/O failure.
+///
+/// Behavior contract: this is **destructive** — any user edits to
+/// SKILL.md / driver.sh are lost. SKILL.md tracks the cc-status
+/// release; users who want a custom skill should give it a different
+/// directory name. README and CHANGELOG document this.
+pub fn refresh_skill_if_installed() -> Result<bool> {
+    let claude_dir = home_dir()?.join(".claude");
+    refresh_skill_if_installed_at(&claude_dir)
+}
+
+/// Same as `refresh_skill_if_installed` but takes the Claude config
+/// directory explicitly. Lets unit tests exercise the refresh path
+/// without mutating the global `HOME` env (which races with parallel
+/// tests reading it for unrelated reasons).
+pub fn refresh_skill_if_installed_at(claude_dir: &std::path::Path) -> Result<bool> {
+    let skill_md = claude_dir
+        .join("skills")
+        .join(INSTALLED_SKILL_DIRNAME)
+        .join("SKILL.md");
+    if !skill_md.exists() {
+        return Ok(false);
+    }
+    install_skill_files(claude_dir)?;
+    Ok(true)
+}
+
 fn install_skill_files(claude_dir: &std::path::Path) -> Result<()> {
     let skill_dir = claude_dir.join("skills").join(INSTALLED_SKILL_DIRNAME);
     std::fs::create_dir_all(&skill_dir)
@@ -442,4 +475,53 @@ fn npm_prefix_from_module_path(exe: &std::path::Path) -> Option<PathBuf> {
         cur = cur.parent()?.to_path_buf();
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Refresh is a no-op when the user never installed the skill.
+    #[test]
+    fn refresh_skill_when_not_installed_is_noop() {
+        let tmp = tempfile::tempdir().unwrap();
+        let claude_dir = tmp.path().join(".claude");
+        // Skill file does NOT exist — function should bail early
+        // and not create anything.
+        let did_refresh = refresh_skill_if_installed_at(&claude_dir).expect("must not error");
+        assert!(!did_refresh, "no skill on disk → nothing to refresh");
+        assert!(
+            !claude_dir.join("skills/cc-status").exists(),
+            "must NOT create skill dir when none existed"
+        );
+    }
+
+    /// When the skill is installed, refresh overwrites SKILL.md
+    /// with the binary's bundled copy. Simulates an upgrade flow:
+    /// stale SKILL.md on disk → after refresh, it matches what
+    /// `install_skill_files` would have written.
+    #[test]
+    fn refresh_skill_overwrites_stale_copy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let claude_dir = tmp.path().join(".claude");
+        let skill_dir = claude_dir.join("skills").join(INSTALLED_SKILL_DIRNAME);
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        let skill_md = skill_dir.join("SKILL.md");
+        std::fs::write(&skill_md, "STALE\n").unwrap();
+        std::fs::write(skill_dir.join("driver.sh"), "#!/bin/sh\nold\n").unwrap();
+
+        let did_refresh = refresh_skill_if_installed_at(&claude_dir).expect("refresh failed");
+        assert!(did_refresh, "skill present → refresh should run");
+
+        let body = std::fs::read_to_string(&skill_md).unwrap();
+        assert!(
+            body.starts_with("---\n"),
+            "refreshed SKILL.md must have frontmatter, got:\n{}",
+            &body[..body.len().min(80)]
+        );
+        assert!(
+            !body.contains("STALE"),
+            "stale content must be replaced after refresh"
+        );
+    }
 }

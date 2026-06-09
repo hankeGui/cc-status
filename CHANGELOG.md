@@ -4,6 +4,47 @@ All notable user-facing changes to **cc-status** are recorded here.
 Versions follow [SemVer](https://semver.org/) (pre-1.0: minor bumps for
 new features, patch bumps for fixes).
 
+## [0.4.1] — 2026-06-09
+
+Theme readability and skill freshness fixes.
+
+### Theme: brighter dim, yellow cost
+
+The `\x1b[2m` (faint) SGR rendered almost invisibly on some terminals
+(notably iTerm 2 dark backgrounds), making the second line of
+`balanced` mode unreadable. Every `DIM` constant in the codebase now
+uses `\x1b[90m` (bright black / light gray) which is consistent
+across terminals and visibly brighter while still reading as
+"secondary information."
+
+Cost segments (`cost_last` / `cost_session` / `cost_today` /
+`cost_week`) now render in **yellow** — money deserves to stand out,
+and the dollar sign matches the yellow tone.
+
+### Skill auto-refresh on `ccs upgrade`
+
+`SKILL.md` ships baked into the binary via `include_str!`, but on
+disk it lives at `~/.claude/skills/cc-status/SKILL.md`. Before this
+release, upgrading cc-status replaced the binary but left a stale
+copy of the skill — meaning Claude wouldn't learn about new commands
+introduced by the new version (e.g. `ccs config edit` or
+`ccs plugin doctor`).
+
+Now `ccs upgrade` overwrites the on-disk skill with the binary's
+bundled copy after a successful version bump. Users who never
+installed the skill see no change. **Behavior contract:** the refresh
+is destructive — any user edits to `SKILL.md` or `driver.sh` are
+overwritten. Users who want a customized skill should put it in a
+directory other than `cc-status/` (the dirname is checked exactly).
+
+### Other
+
+- New unit tests around `refresh_skill_if_installed_at()` (overwrites
+  stale copy, no-ops when not installed).
+- New integration test: `setup --yes --with-skill` overwrites a
+  pre-existing `SKILL.md` with the bundled copy (the same path
+  `ccs upgrade` exercises).
+
 ## [0.4.0] — 2026-06-09
 
 A big release that turns cc-status from a status-line renderer into a

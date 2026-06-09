@@ -501,6 +501,32 @@ fn setup_uninstall_also_removes_skill() {
 }
 
 #[test]
+fn setup_with_skill_overwrites_stale_skill_md() {
+    // Simulates the upgrade flow end-to-end via the CLI: a previously
+    // installed skill is replaced with the bundled copy, not merged.
+    // This is the contract `ccs upgrade` relies on for
+    // `refresh_skill_if_installed()`.
+    let tmp = TempDir::new().unwrap();
+    let claude_dir = tmp.path().join(".claude");
+    let skill_dir = claude_dir.join("skills/cc-status");
+    std::fs::create_dir_all(&skill_dir).unwrap();
+    let skill_md = skill_dir.join("SKILL.md");
+    std::fs::write(&skill_md, "OLD VERSION\n").unwrap();
+
+    ccs(&tmp)
+        .args(["setup", "--yes", "--with-skill"])
+        .assert()
+        .success();
+
+    let body = std::fs::read_to_string(&skill_md).unwrap();
+    assert!(
+        body.starts_with("---\n"),
+        "stale SKILL.md must be overwritten with frontmatter copy"
+    );
+    assert!(!body.contains("OLD VERSION"));
+}
+
+#[test]
 fn setup_with_skill_and_no_skill_are_mutually_exclusive() {
     let tmp = TempDir::new().unwrap();
     let claude_dir = tmp.path().join(".claude");

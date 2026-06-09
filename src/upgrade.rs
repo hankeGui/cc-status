@@ -101,6 +101,26 @@ pub fn run(args: Args) -> Result<()> {
         println!();
         println!("{}✓{} now: {}", GREEN, RESET, v);
     }
+
+    // Conversational helper skill ships with cc-status — `include_str!`
+    // bakes the SKILL.md / driver.sh from this binary's source tree.
+    // After a successful upgrade, refresh the on-disk copy at
+    // ~/.claude/skills/cc-status/ so it teaches Claude about whatever
+    // commands this version added (new segments, plugin sub-commands,
+    // etc.). Skips silently if the user never installed the skill.
+    //
+    // This is destructive: user edits to SKILL.md are overwritten.
+    // README + CHANGELOG document the contract — SKILL.md follows
+    // the cc-status release; users who want a customized variant
+    // should put it in a directory other than `cc-status/`.
+    match crate::setup::refresh_skill_if_installed() {
+        Ok(true) => println!(
+            "{}✓{} refreshed skill at ~/.claude/skills/cc-status/",
+            GREEN, RESET
+        ),
+        Ok(false) => {} // not installed; nothing to do
+        Err(e) => eprintln!("{}!{} could not refresh skill: {}", YELLOW, RESET, e),
+    }
     Ok(())
 }
 
