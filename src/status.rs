@@ -70,11 +70,15 @@ pub fn run() -> Result<()> {
         .or_else(|| stdin.pointer("/workspace/current_dir"))
         .and_then(|v| v.as_str())
         .unwrap_or("(unknown)");
-    let model = stdin
-        .pointer("/model/display_name")
-        .or_else(|| stdin.pointer("/model/id"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("(unknown)");
+    let model_resolved = {
+        let ctx = crate::segments::Ctx {
+            stdin: &stdin,
+            cache: &sess,
+            cfg: &cfg,
+            rollup: None,
+        };
+        crate::segments::resolve_model(&ctx)
+    };
     let ctx_pct = stdin
         .pointer("/context_window/remaining_percentage")
         .and_then(|v| v.as_f64());
@@ -84,7 +88,17 @@ pub fn run() -> Result<()> {
     // --- environment ---
     println!("{B}│ Environment{R}", B = BOLD, R = RESET);
     println!("│   cwd          {}", cwd);
-    println!("│   model        {}", model);
+    match &model_resolved {
+        Some((label, src)) => {
+            let src_str = match src {
+                crate::segments::ModelSource::Transcript => "transcript",
+                crate::segments::ModelSource::Stdin => "stdin",
+                crate::segments::ModelSource::Configured => "settings.json / env",
+            };
+            println!("│   model        {}  {}({}){}", label, DIM, src_str, RESET);
+        }
+        None => println!("│   model        {}(unknown){}", DIM, RESET),
+    }
     println!("│   session id   {}{}{}", DIM, session_id, RESET);
     println!("│   mode         {}", cfg.current_mode);
 

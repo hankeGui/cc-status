@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>cc-status — multi-line status line for Claude Code</title>
-<meta name="description" content="Pure Rust binary, distributed via npm, with cost tracking, prompt-cache TTL, hit-rate, burn-rate, Skill/MCP usage, and a daemon mode." />
+<meta name="description" content="Pure Rust binary, distributed via npm, with cost tracking, prompt-cache TTL, hit-rate, burn-rate, Skill/MCP usage, custom plugin segments, and a daemon mode." />
 <style>
   :root {
     --fg: #1a1d23;
@@ -125,6 +125,9 @@
       <div class="card"><h3>Real context capacity</h3><p>Backsolves the 1M-tier window so the bar means something on extended-context models.</p></div>
       <div class="card"><h3>Skill / MCP usage</h3><p>Counts which Skills and MCP servers got called this session — handy when debugging your prompt.</p></div>
       <div class="card"><h3>Worktree-aware git</h3><p>Branch, ahead/behind, dirty flags, and the worktree name when you're inside one.</p></div>
+      <div class="card"><h3>Custom plugin segments</h3><p>Drop an executable, reference it as <code>{plugin:NAME}</code>. Built-in scaffolder, debug-runner, and health-checker — your script ships in three commands.</p></div>
+      <div class="card"><h3>Drag-and-drop mode editor</h3><p><code>ccs config edit</code> opens a visual editor in your browser. Drag segments between modes and the palette, click Save. Pure stdlib, no daemon — server exits 5s after save.</p></div>
+      <div class="card"><h3>Conversational helper</h3><p>Just say "switch to detailed" or "build me a plugin that shows X" inside Claude Code. The skill teaches Claude how to drive cc-status, no docs needed.</p></div>
     </div>
   </section>
 
@@ -148,8 +151,19 @@ ccs status                          # full session dashboard
 ccs cost --days 30                  # ASCII cost-by-day chart
 ccs mode append cost_today          # add a segment to your current mode
 ccs mode edit                       # open the current mode in $EDITOR
+ccs config edit                     # drag-and-drop mode editor in the browser
 ccs daemon start                    # optional Unix-socket daemon
 ccs upgrade                         # auto-detect install method and update</code></pre>
+  </section>
+
+  <section>
+    <h2>Custom segments in 30 seconds</h2>
+    <p>Need a metric cc-status doesn't ship? <code>ccs plugin</code> scaffolds, debug-runs, and health-checks executable plugins under <code>&lt;config&gt;/plugins/</code>.</p>
+<pre><code>ccs plugin new hello                # scaffold a sh template (or --lang python)
+ccs plugin run hello                # debug: stdout / stderr / exit / timing
+ccs mode append plugin:hello        # wire it into your status line
+ccs plugin doctor                   # health-check every plugin you own</code></pre>
+    <p style="color: var(--fg-dim);">Templates ship with the contract embedded as comments — stdin schema, 250 ms timeout, 80-char output cap, ANSI SGR allowed. <code>ccs plugin run</code> shows the exact value the status line will display, so you never have to restart Claude Code to verify.</p>
   </section>
 
   <footer>

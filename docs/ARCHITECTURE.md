@@ -44,16 +44,26 @@ The detail panel (`ccs status`) and legend (`ccs explain`) reuse the same transc
 
 ## Module map
 
-| File | Lines | Responsibility |
-|---|---|---|
-| `src/main.rs` | 52 | CLI dispatch via `clap`. Subcommands: `render` / `status` / `explain` / `mode` / `init` / `config-path`. |
-| `src/render.rs` | 86 | The `render` subcommand. Reads stdin JSON, runs transcript update, looks up the active mode, expands `{segment}` placeholders, prints lines. |
-| `src/segments.rs` | 344 | Each segment's renderer (`seg_dir`, `seg_git`, ...). All ANSI coloring lives here. |
-| `src/transcript.rs` | 149 | Incremental JSONL parsing. Tracks per-session file offset + inode (rotation detection). Extracts `usage`, `tool_use`, timestamps. |
-| `src/cache.rs` | 63 | Per-session JSON cache (file offset, aggregated counters, last-turn fields). |
-| `src/config.rs` | 147 | TOML config: defaults (`Default for Config`), load/save, mode switching. |
-| `src/status.rs` | 258 | The `status` subcommand. Standalone full dashboard, with auto-locate-transcript fallback. |
-| `src/explain.rs` | 70 | Static legend printer (the `explain` subcommand). |
+| File | Responsibility |
+|---|---|
+| `src/main.rs` | CLI dispatch via `clap`. Subcommands: `render` / `status` / `explain` / `segments` / `cost` / `setup` / `upgrade` / `daemon` / `completions` / `mode` / `plugin` / `config` / `init` / `config-path`. |
+| `src/render.rs` | The `render` subcommand. Reads stdin JSON, runs transcript update, looks up the active mode, expands `{segment}` placeholders, prints lines. Tries the optional daemon first; falls back to inline. |
+| `src/segments.rs` | Each segment's renderer (`seg_dir`, `seg_git`, ..., `seg_plugin`). All ANSI coloring lives here. Wraps each render in `catch_unwind` so a single bad segment can't blank out the whole line. |
+| `src/segments_meta.rs` | Single source of truth for the segment catalog (drives `ccs segments` output and `is_known` validation). |
+| `src/transcript.rs` | Incremental JSONL parsing. Tracks per-session file offset + inode (rotation detection). Extracts `usage`, `tool_use`, timestamps. Token dedupe by `(message.id, requestId)`; tool_use dedupe by `toolu_*` id (kept independent so streaming dupes can't drop Skill/MCP counts). |
+| `src/cache.rs` | Per-session JSON cache (file offset, aggregated counters, last-turn fields, dedupe sets). |
+| `src/config.rs` | TOML config: defaults (`Default for Config`), load/save, mode switching, `mode add`/`append`/`edit`/`rm`. Recognizes the `plugin:NAME` token shape when wrapping bare segment names. |
+| `src/status.rs` | The `status` subcommand. Standalone full dashboard, with auto-locate-transcript fallback. |
+| `src/explain.rs` | Static legend printer (the `explain` subcommand). |
+| `src/list_segments.rs` | The `segments` subcommand — pretty-prints `SEGMENTS`. |
+| `src/pricing.rs` | Per-model USD price table + cost formula. Built-in Opus / Sonnet / Haiku rates, 1M-tier multiplier, user override map. |
+| `src/rollup.rs` | Cross-session aggregation under `~/Library/Caches/.../rollup.json`. Per-day, per-model token totals. Loaded only when a `cost_today` / `cost_week` / `cost` segment is referenced. |
+| `src/cost.rs` | The `cost` subcommand — multi-day ASCII dashboard, by-day / by-model bars, `--debug` per-file reconciliation. |
+| `src/setup.rs` | The `setup` subcommand — writes the `statusLine` block into `~/.claude/settings.json` (with backup). |
+| `src/upgrade.rs` | The `upgrade` subcommand — detects install method (npm / cargo / homebrew / curl) and re-runs it. |
+| `src/daemon.rs` | Optional Unix-socket daemon for sub-ms cold starts. Pure stdlib (no tokio); spawn-thread-per-client. |
+| `src/plugin.rs` | The `plugin` subcommand — scaffolds, lists, debug-runs, and health-checks `{plugin:NAME}` files under `<config>/plugins/`. Templates for sh + python with the contract embedded. |
+| `src/web.rs` | The `config edit` subcommand — short-lived 127.0.0.1 HTTP server backing a drag-and-drop mode editor at `assets/editor.html`. Pure stdlib HTTP parser (GET/POST/OPTIONS, max 64 KB body); URL-token + Host-header allowlist for security. Designed to be the **only** web entry point in cc-status. |
 
 ## Transcript parsing
 
@@ -161,9 +171,48 @@ Add new fields with `#[serde(default)]` so existing cache files continue to load
 
 2. Wire it into the dispatcher in `render(name, ctx)`.
 
-3. Document it in `README.md` "Segments" table, `docs/USAGE.zh.md`, and `src/explain.rs`.
+3. Add an entry to `SEGMENTS` in `src/segments_meta.rs` (drives `ccs segments` output and validation in `mode add`).
 
-That's it — no config registration needed. Users can put `{my_thing}` in any mode template.
+4. Document it in `README.md` "Segments" table, `docs/USAGE.zh.md`, and `src/explain.rs`.
+
+5. If the segment surfaces a new metric, also surface it in `src/status.rs` (the dashboard).
+
+## Plugins (`{plugin:NAME}` segments)
+
+`{plugin:NAME}` is the user-extensibility hatch. At render time, `seg_plugin` execs `<config>/plugins/NAME` with CC's stdin JSON piped in and uses the child's stdout as the segment value. A few invariants make this safe:
+
+- **Path validation.** The `NAME` is checked with `valid_plugin_name`: no `/`, no `\`, no `..`, no leading `.`. The plugin dispatcher refuses anything that could escape the plugins directory before it ever calls `Command::new`.
+- **Hard 250 ms timeout.** `run_plugin` uses `try_wait` polling with a deadline; on timeout it calls `child.kill()` and reaps. The render thread is never blocked waiting on a hung plugin.
+- **Output sanitization.** `sanitize_plugin_output` collapses `\n` / `\r` / `\t` to single spaces, strips control characters except ESC (so plugins can emit ANSI SGR colors), and clips to 80 chars. Bytes read from stdout are also capped at 4 KB.
+- **Fault isolation.** Like every segment, `seg_plugin` runs inside the `catch_unwind` wrapper in `render()`. A panicking or misbehaving plugin renders as `""`; the rest of the line still ships.
+
+The `plugin` subcommand provides four commands so users can build a plugin without leaving the terminal:
+
+| Command | What it does |
+|---|---|
+| `ccs plugin new <name> [--lang sh\|python] [--force]` | Writes a heavily-commented hello-world template (the contract is in the file's docstring), `chmod +x`, prints the next-step recipe. |
+| `ccs plugin list` | Lists files under `<config>/plugins/`, marks each ✓ / ✗ for the executable bit. |
+| `ccs plugin path` | Prints the plugins directory path. |
+| `ccs plugin run <name> [--warm]` | Debug-runs a plugin against a mock CC JSON, printing raw stdout, stderr, exit, elapsed, and the **sanitized** value the status line will display. With `--warm` it discards a first run so reported timing reflects steady state (skipping macOS Gatekeeper's 200 ms+ cold start). |
+| `ccs plugin doctor` | Walks every plugin and grades each: executable bit, shebang or binary detection, warm-run timing vs the 250 ms budget, exit code / stdout, and whether any mode references it. Severity is the worst-of all checks. |
+
+Two design notes worth knowing if you touch this code:
+
+- **Sanitizer is shared with the live path.** `plugin::run_debug` calls `segments::sanitize_plugin_output_for_debug` — a public shim over the same private function `seg_plugin` uses. This guarantees "what `plugin run` shows" is byte-for-byte what the status line will show.
+- **Header classification is heuristic, not authoritative.** `classify_header` reads the first 256 bytes and decides shebang / binary / plain text by NUL/high-byte ratio. It's good enough for a doctor warning ("no shebang — kernel may not exec this") but never blocks `seg_plugin` at render time, where the kernel's exec verdict is the ground truth.
+
+## Web editor (`ccs config edit`)
+
+The visual editor is the only place cc-status starts an HTTP server.
+Two non-obvious invariants worth keeping intact if you touch
+`src/web.rs`:
+
+- **The TCP stream must be put back into blocking mode after `accept()`.** macOS / Linux let the stream inherit the listener's non-blocking flag. If we leave it non-blocking, browsers' speculative pre-connects (HTTP/1.1 connection pre-warming, `<link rel=preconnect>`) hit `read_line` before any bytes arrive and immediately get `EAGAIN` — which we'd interpret as "broken request" and 400. The first request appears to succeed (because the browser actually sent data) but subsequent fetches mysteriously fail. We saw this; the fix is `stream.set_nonblocking(false)` immediately after accept.
+- **Token check skips the HTML landing page only.** `GET /` must succeed without a token, because the JS that reads the token from `location.search` hasn't loaded yet. Every API endpoint validates the token (URL `?token=` query, no custom header — that would force a CORS preflight on every call). The auth model is short-lived: a fresh 32-char token per launch, server exits 5 s after Save or 30 min idle.
+
+The HTTP parser is deliberately narrow: GET/POST/OPTIONS, max 64 KB body, `Content-Length`-based body read, no chunked, no keep-alive (`Connection: close` on every response). Adding routes for unrelated features is **not** fine — write a CLI subcommand instead.
+
+`assets/editor.html` is the single-file UI: vanilla HTML + inline CSS + native HTML5 drag-and-drop, no build step. Round-trips templates as `[{seg}, {seg}, ...]` arrays for ease of drag-and-drop, which means literal text inside templates is dropped on save (this is documented in the README and intentional — users who want literal text keep using `mode edit`).
 
 ## Why no daemon (yet)
 
@@ -177,15 +226,13 @@ For now: not worth it. If someday the bar visibly lags or someone really needs <
 
 ## Testing strategy
 
-Currently there are no automated tests — coverage relies on:
+The crate has both unit and integration tests; CI runs them on macOS-14 and ubuntu-22.04.
 
-- Manual smoke tests with synthesized stdin (see `README.md` and `docs/USAGE.zh.md`).
-- Real Claude Code transcripts under `~/.claude/projects/`.
+- **Unit tests** live next to the code in `#[cfg(test)] mod tests` blocks. They cover pure functions: `progress_bar`, `short_num`, `compute_ctx`, transcript dedupe (including the regression where token-dedupe used to drop Skill/MCP from duplicate copies), pricing math, plugin name validation, output sanitization, header classification, severity merging.
+- **Integration tests** live in `tests/cli.rs`. Each test gets a fresh `TempDir` with `HOME` / `XDG_*` / `APPDATA` overridden so the test never touches the developer's real config or cache. Coverage spans `mode add/list/append/edit/rm`, `setup` (install / check / uninstall), `render` (synthetic stdin), and the full `plugin` family (`new` with both langs, `--force` overwrite, name validation, `list`, `path`, `run`, `doctor` against orphan / non-executable / referenced plugins).
 
-A reasonable test suite would:
+When adding a new segment or subcommand:
 
-- Snapshot test segments against fixed `Ctx` inputs.
-- Property test `progress_bar` and `short_num`.
-- Replay a known transcript through `transcript::update` and assert final `SessionCache` state.
-
-Pull requests welcome.
+- Snapshot test the renderer against a fixed `Ctx` if the output is non-trivial.
+- Add an integration test if the command writes config / cache / on-disk state — those bugs are easy to ship and hard to spot in manual smoke tests.
+- For new `SessionCache` fields, also add a regression test for the dedupe path; the on-disk cache outlives any single render, and silently broken state is the worst kind of bug.

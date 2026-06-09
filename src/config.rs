@@ -83,6 +83,22 @@ fn default_mode() -> String {
 impl Default for Config {
     fn default() -> Self {
         let mut modes = BTreeMap::new();
+        // `balanced` is the default mode for new installs: three lines
+        // covering the things most people want to glance at every turn.
+        // The skills/mcp line vanishes when neither has been called
+        // this session — empty segments collapse and there's nothing
+        // left to render. Line 2 is dense (~80 chars on a healthy
+        // turn) but stays readable on any modern terminal.
+        modes.insert(
+            "balanced".into(),
+            Mode {
+                lines: vec![
+                    "{dir} {git} {model} {ctx}".into(),
+                    "{session_age} {last_turn} {cost_last} {cost_session} {hit_rate} {burn}".into(),
+                    "{skills} {mcp}".into(),
+                ],
+            },
+        );
         modes.insert(
             "compact".into(),
             Mode {
@@ -100,7 +116,7 @@ impl Default for Config {
             Mode {
                 lines: vec![
                     "{dir} {git} {model}".into(),
-                    "{ctx} {last_turn} {cache_ttl} {hit_rate} {burn}".into(),
+                    "{ctx} {last_turn} {hit_rate} {burn}".into(),
                     "{skills} {mcp}".into(),
                 ],
             },
@@ -120,7 +136,6 @@ impl Default for Config {
                 lines: vec![
                     "{dir} {git} {ctx}".into(),
                     "{last_turn} {hit_rate} {burn}".into(),
-                    "{cache_ttl}".into(),
                 ],
             },
         );
@@ -150,7 +165,7 @@ impl Default for Config {
             },
         );
         Self {
-            current_mode: "compact".into(),
+            current_mode: "balanced".into(),
             modes,
             theme: Theme::default(),
             segments: SegmentSettings::default(),
@@ -280,22 +295,185 @@ pub fn remove_mode(name: &str) -> Result<()> {
     Ok(())
 }
 
+// ANSI used by list_modes' pretty preview. Kept local because the
+// rest of this file is configuration plumbing.
+const RESET: &str = "\x1b[0m";
+const BOLD: &str = "\x1b[1m";
+const DIM: &str = "\x1b[2m";
+const CYAN: &str = "\x1b[1;36m";
+const GREEN: &str = "\x1b[0;32m";
+
 pub fn list_modes() -> Result<()> {
     let cfg = load()?;
-    println!("Current mode: {}", cfg.current_mode);
-    println!();
+    let preview_ctx = build_preview_ctx(&cfg);
+
+    println!(
+        "{B}cc-status modes{R}  {DIM}({})\n{DIM}{}{R}",
+        config_path()?.display(),
+        "─".repeat(60),
+        B = BOLD,
+        R = RESET,
+        DIM = DIM,
+    );
+
     for (name, mode) in &cfg.modes {
-        let marker = if name == &cfg.current_mode {
-            "* "
+        let is_current = name == &cfg.current_mode;
+        let header = if is_current {
+            format!(
+                "{G}▸ {C}{}{R}  {DIM}(active){R}",
+                name,
+                G = GREEN,
+                C = CYAN,
+                R = RESET,
+                DIM = DIM,
+            )
         } else {
-            "  "
+            format!("  {C}{}{R}", name, C = CYAN, R = RESET)
         };
-        println!("{}{} ({} line(s))", marker, name, mode.lines.len());
+        println!();
+        println!("{}", header);
+
         for line in &mode.lines {
-            println!("    {}", line);
+            println!("    {DIM}template{R}  {DIM}{}{R}", line, DIM = DIM, R = RESET);
+            // Render the line with mock data so the user sees what each
+            // template actually produces. render_line collapses
+            // whitespace around empty segments — if a segment legitimately
+            // has no preview value it just disappears, which mirrors how
+            // the live status line behaves.
+            let rendered = crate::render::render_line(line, &preview_ctx);
+            if !rendered.trim().is_empty() {
+                println!("    {DIM}example {R}  {}", rendered, DIM = DIM, R = RESET);
+            }
         }
     }
+
+    println!();
+    println!("{}{}{}", DIM, "─".repeat(60), RESET);
+    println!(
+        "{B}Switch:{R}  ccs mode <name>             {B}Append:{R}  ccs mode append <segment>",
+        B = BOLD,
+        R = RESET
+    );
+    println!(
+        "{B}Edit:{R}    ccs mode edit               {B}Add:{R}     ccs mode add <name> -l \"...\"",
+        B = BOLD,
+        R = RESET
+    );
+    println!(
+        "{B}Explain:{R} ccs explain                 {B}Plugins:{R} ccs plugin new <name>",
+        B = BOLD,
+        R = RESET
+    );
+    println!();
+    println!(
+        "{}Examples above are rendered from synthetic data so each segment{}",
+        DIM, RESET
+    );
+    println!(
+        "{}has something to show. Empty segments collapse the surrounding space.{}",
+        DIM, RESET
+    );
     Ok(())
+}
+
+/// Build a `Ctx` populated with representative mock data so every
+/// segment renders to something realistic-looking. The numbers are
+/// chosen to look like a healthy mid-session: 3/4 of the window
+/// remaining, mixed cache hits, a few skill / mcp calls. Keeping this
+/// hand-tuned (instead of e.g. all 1's) means the preview matches the
+/// shape users will actually see.
+///
+/// Returned values stay alive for the lifetime of the borrowed
+/// references in the returned Ctx — caller holds the owning storage
+/// in a tuple.
+fn build_preview_ctx(cfg: &Config) -> crate::segments::Ctx<'_> {
+    use crate::cache::SessionCache;
+    use std::collections::HashMap;
+
+    // We need owned storage for the things `Ctx` borrows, so leak it
+    // into a `Box::leak` — `list_modes` runs once and exits, so the
+    // small leak is fine and avoids threading a tuple of owned data
+    // through call sites.
+    //
+    // Use the user's *real* cwd for `{dir}` and `{git}` so those
+    // segments reflect the actual project they're sitting in. Token /
+    // cost / skill segments stay synthetic because there's no truthful
+    // mock for them at config-listing time.
+    let cwd = std::env::current_dir()
+        .ok()
+        .and_then(|p| p.to_str().map(str::to_string))
+        .unwrap_or_else(|| "/Users/you/projects/cc-status".to_string());
+    let stdin: &'static serde_json::Value = Box::leak(Box::new(serde_json::json!({
+        "cwd": cwd,
+        "model": {
+            "id": "claude-opus-4-7",
+            "display_name": "Claude Opus 4.7"
+        },
+        "context_window": { "remaining_percentage": 75.0 },
+        "session_id": "preview",
+        "transcript_path": ""
+    })));
+
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let mut skill_counts: HashMap<String, u32> = HashMap::new();
+    skill_counts.insert("jira".into(), 3);
+    skill_counts.insert("wiki".into(), 1);
+    let mut mcp_counts: HashMap<String, u32> = HashMap::new();
+    mcp_counts.insert("github".into(), 2);
+
+    // Numbers picked so:
+    //   * `last_turn` shows ↑12.3k ↓2.1k +865 🎯92% (cache_read / hit_base)
+    //   * `ctx` backsolves to ~615k physical → 584k capacity (75% remaining)
+    //   * `burn` over 5 minutes lands around 32k/min
+    //   * `cache_ttl` lands around 4:42 remaining
+    //   * `model` resolves from `last_model` (transcript precedence) so the
+    //     example renders the same canonical id users will actually see
+    let cache: &'static SessionCache = Box::leak(Box::new(SessionCache {
+        last_turn_input: 12_300,
+        last_turn_output: 2_100,
+        last_turn_cache_read: 154_000,
+        last_turn_cache_creation: 865,
+        last_cache_read_ms: Some(now_ms - 18_000),
+        skill_counts,
+        mcp_counts,
+        total_input: 41_000,
+        total_output: 7_500,
+        total_cache_read: 110_000,
+        total_cache_creation: 3_400,
+        first_turn_ms: Some(now_ms - 5 * 60_000),
+        last_turn_ms: Some(now_ms - 30_000),
+        last_model: Some("claude-opus-4-7".to_string()),
+        ..SessionCache::default()
+    }));
+
+    // Mock rollup so cost_today / cost_week / cost can render. One day,
+    // one model — built-in pricing for Opus 4.7 ($5 / $25) gives plausible
+    // dollar figures.
+    let rollup: &'static crate::rollup::Rollup = Box::leak(Box::new({
+        let mut r = crate::rollup::Rollup::default();
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let mut by_model: HashMap<String, crate::rollup::DayBucket> = HashMap::new();
+        by_model.insert(
+            "claude-opus-4-7".into(),
+            crate::rollup::DayBucket {
+                input: 1_200_000,
+                output: 90_000,
+                cache_read: 8_500_000,
+                cache_creation: 250_000,
+            },
+        );
+        r.by_day.insert(today, by_model);
+        r
+    }));
+
+    let cfg_static: &'static Config = Box::leak(Box::new(cfg.clone()));
+
+    crate::segments::Ctx {
+        stdin,
+        cache,
+        cfg: cfg_static,
+        rollup: Some(rollup),
+    }
 }
 
 /// Extract `{name}` tokens from a line template.
@@ -325,6 +503,14 @@ fn format_segment_args(args: &[String]) -> Vec<String> {
         // (anything that already contains a `{` is passed through).
         let formatted = if raw.contains('{') {
             raw.clone()
+        } else if let Some(plugin_name) = raw.strip_prefix("plugin:") {
+            // plugin:NAME → wrap into {plugin:NAME}; the segment dispatcher
+            // routes it at render time. We don't validate against a static
+            // list (the plugin file has to exist on disk).
+            if plugin_name.is_empty() {
+                eprintln!("warning: empty plugin name in 'plugin:'");
+            }
+            format!("{{{}}}", raw)
         } else if !raw.is_empty()
             && raw
                 .chars()
@@ -526,17 +712,17 @@ mod tests {
     }
 
     #[test]
-    fn default_config_has_three_modes() {
+    fn default_config_has_eight_modes() {
         let cfg = Config::default();
-        // The three originals plus the four new presets.
-        assert!(cfg.modes.contains_key("compact"));
-        assert!(cfg.modes.contains_key("detailed"));
-        assert!(cfg.modes.contains_key("debug"));
-        assert!(cfg.modes.contains_key("cost"));
-        assert!(cfg.modes.contains_key("tokens"));
-        assert!(cfg.modes.contains_key("tools"));
-        assert!(cfg.modes.contains_key("minimal"));
-        assert_eq!(cfg.current_mode, "compact");
+        // Default lineup: balanced (active) + 7 specialty presets.
+        // Update this whenever the default lineup changes — it's the
+        // canary for `presets_are_present_after_init` in tests/cli.rs.
+        for name in &[
+            "balanced", "compact", "minimal", "detailed", "cost", "tokens", "tools", "debug",
+        ] {
+            assert!(cfg.modes.contains_key(*name), "missing default mode: {}", name);
+        }
+        assert_eq!(cfg.current_mode, "balanced");
     }
 
     #[test]

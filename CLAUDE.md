@@ -4,7 +4,7 @@ Project-level context for Claude Code agents working on **cc-status**.
 
 ## What this is
 
-A status-line tool for Claude Code itself. Single Rust binary (`ccs`) with subcommands: `render`, `status`, `explain`, `mode`, `init`, `config-path`. Lives at <https://github.com/hankeGui/cc-status>.
+A status-line tool for Claude Code itself. Single Rust binary (`ccs`) with subcommands: `render`, `status`, `explain`, `segments`, `cost`, `setup`, `upgrade`, `daemon`, `completions`, `mode`, `plugin`, `init`, `config-path`. Lives at <https://github.com/hankeGui/cc-status>.
 
 ## Common commands
 
@@ -21,22 +21,31 @@ echo '{"cwd":"'$PWD'","model":{"display_name":"Test"},"context_window":{"remaini
 
 # Run the dashboard (auto-locates a transcript by cwd)
 ./target/release/ccs status
+
+# Tests
+cargo test                           # unit + integration; isolated via TempDir + env overrides
+cargo test --bin ccs <module>::      # narrow to one module's unit tests
+cargo test --test cli <name>         # narrow to one integration test
 ```
 
-There are **no automated tests** in the tree. Verify behavior with synthetic stdin (above) and real transcripts under `~/.claude/projects/`.
+There **are** automated tests — both unit (next to source under `#[cfg(test)] mod tests`) and integration (`tests/cli.rs`, full subcommand coverage with `XDG_*` / `HOME` / `APPDATA` overrides per-test). Don't ship a feature without tests; don't claim "no test framework here" — there is.
 
 ## Architecture, in brief
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for full data flow. Module summary:
 
 - `src/main.rs` — CLI dispatch.
-- `src/render.rs` — `ccs render` (the status-line entry point).
+- `src/render.rs` — `ccs render` (the status-line entry point; tries daemon, falls back inline).
 - `src/status.rs` — `ccs status` (multi-line dashboard).
 - `src/explain.rs` — `ccs explain` (static legend).
-- `src/segments.rs` — per-segment renderers + `compute_ctx()` (capacity backsolve).
-- `src/transcript.rs` — incremental JSONL parsing.
-- `src/cache.rs` — per-session disk cache (file offset + counters).
-- `src/config.rs` — TOML schema, load/save, mode switching.
+- `src/segments.rs` — per-segment renderers + `compute_ctx()` (capacity backsolve) + plugin segment dispatcher.
+- `src/segments_meta.rs` — single source of truth for the segment catalog.
+- `src/transcript.rs` — incremental JSONL parsing + token / tool-use dedupe.
+- `src/cache.rs` — per-session disk cache (file offset + counters + dedupe sets).
+- `src/config.rs` — TOML schema, load/save, mode switching, `mode add/append/edit/rm`.
+- `src/pricing.rs`, `src/rollup.rs`, `src/cost.rs` — cost segments + cross-session rollup + `ccs cost`.
+- `src/setup.rs`, `src/upgrade.rs`, `src/daemon.rs` — `ccs setup`, `ccs upgrade`, optional Unix-socket daemon.
+- `src/plugin.rs` — `ccs plugin` (scaffold / list / path / run / doctor) for `{plugin:NAME}` segments.
 
 ## Conventions
 
@@ -49,12 +58,13 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for full data flow. Module summ
 
 ## Things to avoid
 
-- **Don't fetch network / call APIs.** All data must come from CC's stdin JSON or from `~/.claude/*` on disk. cc-status is offline.
+- **Don't fetch network / call APIs.** All data must come from CC's stdin JSON or from `~/.claude/*` on disk. cc-status is offline. (Plugins are user code and may technically do whatever they want, but the docs explicitly call out that network calls will blow the 250 ms budget.)
 - **Don't hardcode model context windows.** Use the backsolve in `segments::compute_ctx`. Hardcoding will break the day Anthropic ships a new size.
-- **Don't add a daemon yet.** It's on the roadmap, but the cold-start budget is fine. Don't optimize prematurely.
-- **Don't write to `~/.claude/`.** That directory belongs to Claude Code. cc-status reads transcripts from there but never writes. Our writes go to `$XDG_CACHE_HOME/cc-status/` and `$XDG_CONFIG_HOME/cc-status/`.
+- **Don't write to `~/.claude/`.** That directory belongs to Claude Code. cc-status reads transcripts from there but never writes. Our writes go to `$XDG_CACHE_HOME/cc-status/` and `$XDG_CONFIG_HOME/cc-status/` (which on macOS is `~/Library/Caches/...` and `~/Library/Application Support/...`).
 - **Don't break the JSON schema CC sends to `render`.** It's an external contract. New fields = optional with sensible fallbacks.
 - **Don't use `unwrap()` in hot paths.** Status-line render must always print something; a panic is a regression even if no one sees the stack trace. Use `?` + bubble up, or fall back to empty string for a single segment.
+- **Don't relax `valid_plugin_name` to allow `/` or leading `.`.** That's the only thing keeping `{plugin:../../etc/passwd}` from escaping the plugins directory.
+- **Don't lengthen the plugin timeout past 250 ms** without rethinking the render budget — Claude Code's status-line ceiling is 300 ms, and `git status` already eats 150 ms in monorepos.
 
 ## When adding a segment
 
@@ -69,6 +79,35 @@ Workflow:
    - `src/explain.rs` — the legend printed by `ccs explain`.
 5. If the segment surfaces a new metric, also surface it in `src/status.rs` (the dashboard).
 6. Smoke-test with synthetic stdin (see "Common commands"). Empty/missing data must yield `""` (the renderer collapses surrounding whitespace).
+7. Add a unit test in `src/segments.rs::tests` for the renderer; add an integration test in `tests/cli.rs` if behavior is observable end-to-end.
+
+## When working on the conversational helper skill
+
+`.claude/skills/run-cc-status/` is shipped two ways: (1) live in this repo for development; (2) bundled into the binary via `include_str!` in `src/setup.rs` and installed to `~/.claude/skills/cc-status/` when the user runs `ccs setup`. That dual life has a few rules:
+
+- **The bundled SKILL.md uses repo-internal paths** (`./target/release/ccs`, `sh .claude/skills/run-cc-status/driver.sh`). `setup::install_skill_files` rewrites those to user-facing paths during install. If you add a new repo-internal path string to SKILL.md, also add a `.replace(...)` for it in `install_skill_files`, **and** assert in the integration test (`setup_with_skill_installs_skill_files`) that the rewritten copy doesn't contain it. Forgetting this means users get a SKILL.md whose driver instructions point at non-existent paths.
+- **The driver script (`driver.sh`) must keep working in the repo too** — running `sh .claude/skills/run-cc-status/driver.sh` from the repo root is part of CI / smoke-testing and how a future agent verifies the skill from this codebase. Keep `${CCS:-./target/release/ccs}` as the in-repo default; the user-side rewrite swaps it for `${CCS:-ccs}`.
+- **The skill's `description:` frontmatter is the only thing Claude semantically matches against** when deciding whether to auto-load it. If you add a new workflow (say, "renaming a mode"), add the user's likely phrasing to the description. Generic descriptions ("helps with cc-status") won't get loaded.
+- **Don't introduce new `allowed-tools` casually.** The current set is `Bash, Read, Edit, Write` — that's enough to drive every `ccs` command and edit plugin files. Adding e.g. `WebFetch` would expand what Claude could do under this skill in surprising ways.
+
+## When working on `{plugin:NAME}` segments
+
+The plugin segment is the only place where cc-status execs arbitrary user code at render time. Two non-obvious invariants you must preserve:
+
+- **Path validation runs before exec.** `valid_plugin_name` (in both `src/segments.rs` and `src/plugin.rs`) keeps `{plugin:../../foo}` from escaping the plugins directory. Both copies must agree — if you tighten one, tighten the other. Do not pass user-supplied path components straight to `Command::new`.
+- **The 250 ms hard timeout uses `try_wait` polling, not just `recv_timeout` with a leaked thread.** When the deadline hits we call `child.kill()` then `wait()`. Don't replace this with a `mpsc::recv_timeout` style ("just abandon the thread") — `git` does that because git is fast; a plugin can spin a 30-second background process and we must not leave it scheduled forever.
+
+When changing the runtime sanitizer (`segments::sanitize_plugin_output`), update `segments::sanitize_plugin_output_for_debug` (the public shim that `plugin run` uses) — they share the implementation, but if you ever decouple them, "what `plugin run` shows" and "what the status line shows" silently diverge. That's the worst class of bug for a debug tool.
+
+When changing templates in `src/plugin.rs`:
+
+- The `# debug: ccs plugin run <name>` line and the `stdout: 80 chars / 250 ms / ANSI SGR allowed` lines are the user-facing contract — keep them in sync with the actual implementation.
+- Don't add a third language template casually. We picked sh + python because their cold-start fits the budget; node already pushes 70–150 ms cold, ruby/perl are similar. Adding more is a maintenance tax and nudges users toward runtimes that won't fit.
+
+When changing `plugin doctor`:
+
+- Each check returns a `Severity` (`Ok` / `Warn` / `Fail`). The reported severity is the **worst** of all checks via `Severity::merge`. Don't shortcut and report only the first hit — users want to see every issue at once.
+- The orphan check requires loading `Config`. If config load fails, doctor must continue (silently skip the orphan check) rather than abort — users may be debugging a broken config file, and that's exactly when doctor is most useful.
 
 ## When changing capacity / context display
 

@@ -81,7 +81,11 @@ pub fn render_string(stdin: &Value) -> Result<String> {
     Ok(lines.join("\n"))
 }
 
-fn render_line(template: &str, ctx: &segments::Ctx) -> String {
+/// Expand `{segment}` placeholders in `template` against `ctx` and
+/// collapse the runs of whitespace left behind by empty segments.
+/// Public so other subcommands (notably `mode list`'s preview) can
+/// share the exact rendering path the status line uses.
+pub fn render_line(template: &str, ctx: &segments::Ctx) -> String {
     let mut out = String::with_capacity(template.len());
     let mut rest = template;
     while let Some(start) = rest.find('{') {

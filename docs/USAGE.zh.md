@@ -122,6 +122,40 @@ ccs setup
 ~/hanke-dev/cc-status main  Claude Opus 4.7  ctx 86% █████▏ 154.6k/950k
 ```
 
+### 1.x 对话式助手（推荐）
+
+`ccs setup` 默认会问要不要装一个 **Claude Code skill**（路径 `~/.claude/skills/cc-status/`）。装上以后你不用记任何命令，直接在 Claude Code 对话里说话就行：
+
+- "把状态栏切成 detailed"
+- "在状态栏加上今天的花费"
+- "做个插件显示我 jira 上未读 issue 数"
+- "状态栏怎么是空的，帮我看看哪里有问题"
+- "🎯99% 是啥意思"
+
+Claude 会读 skill 的 SKILL.md，**自己跑**对应的 `ccs` 命令，给你看渲染效果，破坏性操作前会和你确认。
+
+强制装：`ccs setup --with-skill`。跳过：`ccs setup --no-skill`。卸载：`ccs setup --uninstall`（会同时清掉 statusLine 配置和 skill）。
+
+### 1.y 可视化编辑器：`ccs config edit`
+
+不想记 segment 名字？直接拖拽：
+
+```sh
+ccs config edit
+```
+
+启动一个临时的 127.0.0.1 网页（随机端口 + URL token），自动打开浏览器：
+
+- **顶部 mode tabs**：点击切换正在编辑的 mode
+- **每行的 segment 块**可以拖拽：行内重排、跨行移动、拖回 palette = 删除、点 `×` = 删
+- **底部 palette**：所有内置 segment + 你 `<config>/plugins/` 下的插件
+- **实时预览**：用 mock 数据渲染，无需真实会话也能看效果
+- **Save** 写入 `config.toml`，server 5 秒后自动退出
+
+纯 stdlib HTTP，无新增依赖；30 分钟空闲也会自动退出。改 mode 排版最直观的入口。
+
+> 局限：模板里的字面量文字（如 debug mode 里 `cache: {cache_ttl}` 的"cache:"）保存时会被丢掉。需要保留字面量请用 `ccs mode edit` 文本编辑。
+
 ---
 
 ## 2. 三种交互方式
@@ -301,6 +335,7 @@ lines = [
 | `{cache_ttl}` | `cache 3:42` | prompt cache 5min TTL 倒计时（红 < 1min） |
 | `{hit_rate}` | `hit 96%` | 整会话累计命中率 |
 | `{burn}` | `🔥 32.4k/min` | 会话平均 token 速率 |
+| `{session_age}` | `1h23m` | 距第一次 assistant 回复的时长（s/m/h/d）|
 | `{skills}` | `skills: jira×3 wiki×1` | Skill 调用次数（按次数倒序，最多 4 个） |
 | `{mcp}` | `mcp: github×2` | MCP 服务器调用次数 |
 | `{cost_last}` | `last $0.012` | 上一轮花了多少美元（按当前模型价格） |
@@ -309,6 +344,65 @@ lines = [
 | `{cost_week}` | `7d $24.50` | 最近 7 天累计成本 |
 | `{cost}` | `last $0.012 · today $4.18` | `cost_last + cost_today` 的组合 |
 | `{mode}` | `[detailed]` | 当前模式名 |
+| `{plugin:NAME}` | *（插件输出）* | 跑 `<config>/plugins/NAME` 拿 stdout（见下方"插件段"）|
+
+### 插件段（自定义命令）
+
+需要 cc-status 没自带的指标？内置脚手架直接生成可执行模板。
+
+#### 30 秒上手
+
+```sh
+ccs plugin new hello                  # 用 sh 模板创建（推荐）
+ccs plugin run hello                  # 调试运行：看 stdout/stderr/exit/耗时
+ccs mode append plugin:hello          # 加到当前 mode
+```
+
+或者用 Python 模板：
+
+```sh
+ccs plugin new my-metric --lang python
+```
+
+#### 管理插件
+
+```sh
+ccs plugin list                       # 列已装的插件，标可执行状态
+ccs plugin doctor                     # 全部插件体检（耗时 / 孤儿 / chmod）
+ccs plugin path                       # 插件目录路径
+ccs plugin run my-metric --warm       # 跑两次取第二次的耗时（避开冷启动）
+ccs plugin new my-metric --force      # 覆盖已存在的插件文件
+```
+
+`ccs plugin doctor` 把每个插件暖热跑一次，按以下规则打分：
+
+- ✗ **fail** — 没可执行位、exec 失败、文件为空、或暖热耗时 > 250 ms（render 时一定超时）
+- ⚠ **warn** — 没 shebang、退出码非 0、stdout 为空、或没被任何 mode 引用（孤儿）
+- ✓ **ok** — 全过
+
+写完插件、改完插件、或者怀疑某个老插件还在但忘了用，跑一下 `doctor` 就能一眼定位问题。
+
+#### 约定
+
+插件就是 `<配置目录>/plugins/<NAME>` 下的可执行文件 —— shebang 脚本（sh / python / ruby …）或编译过的二进制都行。cc-status 把它当子进程跑，约定如下：
+
+- 可执行文件的 stdin 是 Claude Code 的状态栏 JSON（schema：`{cwd, model.{id,display_name}, context_window.remaining_percentage, session_id, transcript_path}`）
+- **stdout** 即段值；换行/制表符塌成空格，ANSI SGR 颜色保留，其他控制字符剥掉，最长 80 字符
+- 硬超时 **250ms** —— 超时插件被杀，段渲染为空。用 `ccs plugin run --warm` 测稳态耗时（macOS Gatekeeper 第一次跑会加 200ms+）
+- 退出码非 0 / stdout 为空 / 文件不存在 → 段渲染为 `""`（周围空格自动塌缩）
+- 插件继承用户的 `$PATH` 和环境变量
+
+#### 性能预算
+
+| 运行时 | 冷启动 | 暖热 | 评价 |
+|---|---|---|---|
+| 原生二进制（Go / Rust） | <5 ms | <5 ms | 最佳 |
+| sh / bash | 5–20 ms | 5–10 ms | 很好 |
+| python3 | 30–80 ms | ~30 ms | 逻辑紧凑 OK |
+| node | 70–150 ms | ~70 ms | 复杂逻辑容易超 |
+| 任何网络调用 | 100ms+ | 100ms+ | **别做** —— 一定超时 |
+
+插件**每次状态栏刷新**都跑一遍 —— 每条 prompt 都跑 —— 必须快。
 
 ### 颜色约定
 

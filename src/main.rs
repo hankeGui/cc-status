@@ -8,6 +8,7 @@ mod cost;
 mod daemon;
 mod explain;
 mod list_segments;
+mod plugin;
 mod pricing;
 mod render;
 mod rollup;
@@ -17,6 +18,7 @@ mod setup;
 mod status;
 mod transcript;
 mod upgrade;
+mod web;
 
 #[derive(Parser)]
 #[command(name = "ccs", version, about = "Claude Code status line")]
@@ -58,6 +60,12 @@ enum Cmd {
         /// Remove the statusLine block instead of installing it.
         #[arg(long)]
         uninstall: bool,
+        /// Force-install the conversational helper skill (no prompt).
+        #[arg(long)]
+        with_skill: bool,
+        /// Skip the conversational helper skill (no prompt).
+        #[arg(long, conflicts_with = "with_skill")]
+        no_skill: bool,
     },
     /// Upgrade ccs in place using the original install method.
     Upgrade {
@@ -86,6 +94,11 @@ enum Cmd {
         #[arg(value_name = "NAME")]
         name: Option<String>,
     },
+    /// Manage `{plugin:NAME}` segments — scaffold, list, debug.
+    Plugin {
+        #[command(subcommand)]
+        action: PluginAction,
+    },
     /// Write a default config file. Use --force to overwrite an existing one.
     Init {
         #[arg(long)]
@@ -93,6 +106,13 @@ enum Cmd {
     },
     /// Print resolved config path.
     ConfigPath,
+    /// Open a drag-and-drop mode editor in the browser. Spawns a
+    /// short-lived 127.0.0.1 server that exits 5 s after Save (or
+    /// after 30 minutes of idle).
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -109,6 +129,55 @@ enum DaemonAction {
     Restart,
     /// Show daemon status.
     Status,
+}
+
+#[derive(Subcommand)]
+enum ConfigAction {
+    /// Open a drag-and-drop mode editor in the browser. Starts a
+    /// short-lived 127.0.0.1 server that exits 5 s after Save (or
+    /// after 30 minutes of idle).
+    Edit {
+        /// Don't try to launch the browser; just print the URL.
+        #[arg(long)]
+        no_open: bool,
+        /// Bind to a specific port instead of letting the OS pick.
+        #[arg(long)]
+        port: Option<u16>,
+    },
+}
+
+#[derive(Subcommand)]
+enum PluginAction {
+    /// List installed plugins (executables under `<config>/plugins/`).
+    List,
+    /// Print the plugins directory path.
+    Path,
+    /// Scaffold a new plugin from a template (sh or python).
+    New {
+        /// Plugin name (letters, digits, '-', '_', '.'; cannot start with '.').
+        name: String,
+        /// Language template: sh (default) or python.
+        #[arg(long, default_value = "sh")]
+        lang: String,
+        /// Overwrite if a file with this name already exists.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Run a plugin in debug mode (shows stdout, stderr, exit, elapsed,
+    /// and the sanitized value the status line would display).
+    Run {
+        /// Plugin name (must already exist under `<config>/plugins/`).
+        name: String,
+        /// Run twice and report the second run's timing. macOS Gatekeeper
+        /// adds 200ms+ to the first execution of a new file; --warm shows
+        /// the steady-state cost the status line will actually pay.
+        #[arg(long)]
+        warm: bool,
+    },
+    /// Health-check every installed plugin: executable bit, shebang,
+    /// warm runtime vs the 250ms budget, exit code, and whether any
+    /// mode references it.
+    Doctor,
 }
 
 #[derive(Subcommand)]
@@ -175,11 +244,23 @@ fn main() -> Result<()> {
             yes,
             check,
             uninstall,
-        } => setup::run(setup::Args {
-            yes,
-            check,
-            uninstall,
-        }),
+            with_skill,
+            no_skill,
+        } => {
+            let skill = if with_skill {
+                Some(true)
+            } else if no_skill {
+                Some(false)
+            } else {
+                None
+            };
+            setup::run(setup::Args {
+                yes,
+                check,
+                uninstall,
+                skill,
+            })
+        }
         Cmd::Upgrade { yes, check } => upgrade::run(upgrade::Args { yes, check }),
         Cmd::Daemon { action } => match action {
             DaemonAction::Start { foreground } => daemon::start(daemon::StartArgs { foreground }),
@@ -216,10 +297,23 @@ fn main() -> Result<()> {
             (None, Some(name)) => config::set_mode(&name),
             (None, None) => config::list_modes(),
         },
+        Cmd::Plugin { action } => match action {
+            PluginAction::List => plugin::run(plugin::Action::List),
+            PluginAction::Path => plugin::run(plugin::Action::Path),
+            PluginAction::New { name, lang, force } => {
+                let lang = plugin::Lang::from_flag(&lang)?;
+                plugin::run(plugin::Action::New { name, lang, force })
+            }
+            PluginAction::Run { name, warm } => plugin::run(plugin::Action::Run { name, warm }),
+            PluginAction::Doctor => plugin::run(plugin::Action::Doctor),
+        },
         Cmd::Init { force } => config::init_default(force),
         Cmd::ConfigPath => {
             println!("{}", config::config_path()?.display());
             Ok(())
         }
+        Cmd::Config { action } => match action {
+            ConfigAction::Edit { no_open, port } => web::run(web::Args { no_open, port }),
+        },
     }
 }

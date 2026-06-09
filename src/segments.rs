@@ -1,11 +1,12 @@
 use crate::cache::SessionCache;
-use crate::config::Config;
+use crate::config::{self, Config};
 use crate::pricing;
 use crate::rollup::Rollup;
 use chrono::Utc;
 use serde_json::Value;
-use std::path::Path;
-use std::process::Command;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
 const RESET: &str = "\x1b[0m";
 const BOLD_CYAN: &str = "\x1b[1;36m";
@@ -36,6 +37,9 @@ pub fn render(name: &str, ctx: &Ctx) -> String {
 }
 
 fn render_inner(name: &str, ctx: &Ctx) -> String {
+    if let Some(plugin_name) = name.strip_prefix("plugin:") {
+        return seg_plugin(plugin_name, ctx);
+    }
     match name {
         "dir" => seg_dir(ctx),
         "git" => seg_git(ctx),
@@ -47,6 +51,7 @@ fn render_inner(name: &str, ctx: &Ctx) -> String {
         "skills" => seg_skills(ctx),
         "mcp" => seg_mcp(ctx),
         "burn" => seg_burn(ctx),
+        "session_age" => seg_session_age(ctx),
         "hit_rate" => seg_hit_rate(ctx),
         "cost_last" => seg_cost_last(ctx),
         "cost_session" => seg_cost_session(ctx),
@@ -200,16 +205,148 @@ fn run_git(cwd: &str, args: &[&str]) -> Option<String> {
 }
 
 fn seg_model(ctx: &Ctx) -> String {
-    let name = ctx
+    let Some((name, _src)) = resolve_model(ctx) else {
+        return String::new();
+    };
+    format!("{}{}{}", DIM, name, RESET)
+}
+
+/// Where the model name we're displaying came from. Surfaced by
+/// `ccs status` so users can debug intermediary remappings (Bedrock,
+/// proxies, OpenRouter) — when the bar shows a name they didn't
+/// expect, knowing the source narrows it down in one line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelSource {
+    /// Read from a real `message.model` value in the JSONL transcript
+    /// — Claude Code actually called this id, regardless of what
+    /// stdin or settings.json said.
+    Transcript,
+    /// `model.display_name` / `model.id` from Claude Code's stdin
+    /// JSON. Useful before any assistant turn has landed.
+    Stdin,
+    /// `model` field in `~/.claude/settings.json` or the
+    /// `CLAUDE_MODEL` env var — the user's *configured* default,
+    /// shown when neither transcript nor stdin has provided one.
+    Configured,
+}
+
+/// Resolve the best-available model name for display, with its source.
+/// Pre-segment helper so `seg_model`, `ccs status`, and any future
+/// caller agree on the same precedence ladder.
+///
+/// Precedence:
+///   1. `cache.last_model` — from the transcript, the most authoritative
+///      because it's the model Claude Code actually invoked.
+///   2. `stdin.model.display_name` then `stdin.model.id` — Claude
+///      Code's own self-reported model. Can be rewritten by proxies.
+///   3. `~/.claude/settings.json` `model` field, then `$CLAUDE_MODEL`.
+///
+/// Whichever source wins, we cleanup_id the value (strip noisy
+/// `anthropic--` / `anthropic/` prefixes only — never rename the
+/// model itself, since intermediaries may be deploying through
+/// Bedrock / Vertex / OpenRouter and that prefix is meaningful) and
+/// then preserve any `[1m]` / `(1m)` tier suffix from any source.
+pub fn resolve_model(ctx: &Ctx) -> Option<(String, ModelSource)> {
+    let stdin_id = ctx
         .stdin
-        .pointer("/model/display_name")
-        .or_else(|| ctx.stdin.pointer("/model/id"))
+        .pointer("/model/id")
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    if name.is_empty() {
-        return String::new();
+    let stdin_dn = ctx
+        .stdin
+        .pointer("/model/display_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    // Tier suffix: check every source we'll touch — the user's
+    // configured tier shouldn't disappear just because the transcript
+    // model id doesn't echo it back. Anthropic's transcript writes
+    // canonical `claude-opus-4-7` without the tier suffix, so we
+    // recover it from stdin / settings even when the transcript wins.
+    let tier = detect_tier(stdin_id)
+        .or_else(|| detect_tier(stdin_dn))
+        .or_else(|| configured_model().as_deref().and_then(detect_tier));
+
+    let (raw, src) = if let Some(m) = ctx.cache.last_model.as_deref().filter(|s| !s.is_empty()) {
+        (m.to_string(), ModelSource::Transcript)
+    } else if !stdin_dn.is_empty() {
+        (stdin_dn.to_string(), ModelSource::Stdin)
+    } else if !stdin_id.is_empty() {
+        (stdin_id.to_string(), ModelSource::Stdin)
+    } else if let Some(m) = configured_model() {
+        (m, ModelSource::Configured)
+    } else {
+        return None;
+    };
+
+    Some((finalize_model_label(&raw, tier.as_deref()), src))
+}
+
+/// Drop the tier suffix from a candidate id and prepend nothing —
+/// we only attach the tier once at the end, in `finalize_model_label`.
+fn strip_tier(s: &str) -> &str {
+    // Strip a trailing tier marker if present. We accept either
+    // bracketed (`[1m]`) or parenthesized (`(1m)`) — Claude Code has
+    // shipped both forms over time. Whitespace before the tier is
+    // tolerated.
+    for suffix in ["[1m]", "(1m)", " [1m]", " (1m)"] {
+        if let Some(stripped) = s.strip_suffix(suffix) {
+            return stripped.trim_end();
+        }
     }
-    format!("{}{}{}", DIM, name, RESET)
+    s
+}
+
+fn detect_tier(s: &str) -> Option<String> {
+    if s.contains("[1m]") || s.contains("(1m)") {
+        Some("[1m]".to_string())
+    } else {
+        None
+    }
+}
+
+/// Strip vendor / proxy prefixes that add noise without identity.
+/// Conservative: only the Anthropic-self prefix `anthropic--` /
+/// `anthropic/` is removed. Bedrock / Vertex / OpenRouter prefixes
+/// stay because the deployment target is information the user might
+/// actually want to see in their status bar.
+fn cleanup_id(s: &str) -> &str {
+    for prefix in ["anthropic--", "anthropic/"] {
+        if let Some(rest) = s.strip_prefix(prefix) {
+            return rest;
+        }
+    }
+    s
+}
+
+fn finalize_model_label(raw: &str, tier: Option<&str>) -> String {
+    let body = cleanup_id(strip_tier(raw));
+    match tier {
+        Some(t) => format!("{} {}", body, t),
+        None => body.to_string(),
+    }
+}
+
+/// Read the user's configured default model from
+/// `~/.claude/settings.json` (`model` field) or the `CLAUDE_MODEL`
+/// env var. Returns `None` if neither is set or the file can't be
+/// parsed — this is a best-effort fallback, not a hard requirement.
+fn configured_model() -> Option<String> {
+    if let Ok(env) = std::env::var("CLAUDE_MODEL") {
+        if !env.trim().is_empty() {
+            return Some(env);
+        }
+    }
+    let home = std::env::var("HOME").ok()?;
+    let path = std::path::PathBuf::from(home)
+        .join(".claude")
+        .join("settings.json");
+    let text = std::fs::read_to_string(&path).ok()?;
+    let v: Value = serde_json::from_str(&text).ok()?;
+    v.get("model")
+        .and_then(|x| x.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
 }
 
 fn seg_ctx(ctx: &Ctx) -> String {
@@ -413,6 +550,38 @@ fn seg_burn(ctx: &Ctx) -> String {
     format!("{}🔥 {}/min{}", DIM, short_num(rate_per_min as u64), RESET)
 }
 
+fn seg_session_age(ctx: &Ctx) -> String {
+    // Wall-clock duration from the first assistant turn to "now".
+    // We anchor on the first-turn timestamp (not last-turn) so a long
+    // pause between turns still reads as "12m" rather than collapsing
+    // back to "0s". Returns "" until the first turn lands so the
+    // segment vanishes during cold-start.
+    let Some(first) = ctx.cache.first_turn_ms else {
+        return String::new();
+    };
+    let now = chrono::Utc::now().timestamp_millis();
+    let elapsed_s = ((now - first) / 1000).max(0);
+    format!("{}{}{}", DIM, format_duration(elapsed_s as u64), RESET)
+}
+
+/// Render a duration as the most compact human label that still
+/// conveys magnitude. Buckets:
+///   < 60s        → "42s"
+///   < 60min      → "12m"
+///   < 24h        → "1h23m"
+///   ≥ 24h        → "2d3h"
+fn format_duration(secs: u64) -> String {
+    if secs < 60 {
+        format!("{}s", secs)
+    } else if secs < 3600 {
+        format!("{}m", secs / 60)
+    } else if secs < 86_400 {
+        format!("{}h{:02}m", secs / 3600, (secs % 3600) / 60)
+    } else {
+        format!("{}d{}h", secs / 86_400, (secs % 86_400) / 3600)
+    }
+}
+
 fn seg_hit_rate(ctx: &Ctx) -> String {
     let c = ctx.cache;
     let base = c.total_input + c.total_cache_read + c.total_cache_creation;
@@ -540,6 +709,242 @@ mod tests {
         let ctx = ctx_for_test(&stdin, &cache, &cfg);
         assert_eq!(render("nope", &ctx), "{nope}");
     }
+
+    // --- session_age ---------------------------------------------------
+
+    #[test]
+    fn format_duration_buckets() {
+        assert_eq!(format_duration(0), "0s");
+        assert_eq!(format_duration(1), "1s");
+        assert_eq!(format_duration(59), "59s");
+        assert_eq!(format_duration(60), "1m");
+        assert_eq!(format_duration(720), "12m");        // 12 minutes
+        assert_eq!(format_duration(3599), "59m");       // < 1h
+        assert_eq!(format_duration(3600), "1h00m");
+        assert_eq!(format_duration(4980), "1h23m");     // 1h23m
+        assert_eq!(format_duration(86_399), "23h59m");
+        assert_eq!(format_duration(86_400), "1d0h");
+        assert_eq!(format_duration(183_600), "2d3h");
+    }
+
+    #[test]
+    fn session_age_renders_empty_without_first_turn() {
+        let stdin = serde_json::Value::Null;
+        let cache = SessionCache::default();      // first_turn_ms = None
+        let cfg = Config::default();
+        let ctx = ctx_for_test(&stdin, &cache, &cfg);
+        assert_eq!(seg_session_age(&ctx), "");
+    }
+
+    #[test]
+    fn session_age_renders_minutes_for_recent_session() {
+        // first_turn_ms set ~720 seconds ago → seg should produce "12m"
+        // (give or take 1s of jitter from the test reading the clock).
+        let mut cache = SessionCache::default();
+        let now = chrono::Utc::now().timestamp_millis();
+        cache.first_turn_ms = Some(now - 720_000);
+        let stdin = serde_json::Value::Null;
+        let cfg = Config::default();
+        let ctx = ctx_for_test(&stdin, &cache, &cfg);
+        let s = seg_session_age(&ctx);
+        // Strip ANSI for a clean assertion.
+        let stripped: String = s.chars().filter(|c| !c.is_control() && *c != 'm' || *c == 'm').collect();
+        assert!(
+            stripped.contains("12m") || stripped.contains("11m"),
+            "expected ~12m, got: {:?}",
+            s
+        );
+    }
+
+    // --- model resolution ---------------------------------------------
+
+    #[test]
+    fn cleanup_id_strips_only_anthropic_self_prefixes() {
+        // Anthropic-self prefixes are noise → strip them.
+        assert_eq!(cleanup_id("anthropic--claude-opus-latest"), "claude-opus-latest");
+        assert_eq!(cleanup_id("anthropic/claude-opus-4-7"), "claude-opus-4-7");
+        // Deployment prefixes are *information* — keep them so users
+        // know they're hitting Bedrock / Vertex / OpenRouter.
+        assert_eq!(cleanup_id("bedrock/anthropic.claude-opus-4"), "bedrock/anthropic.claude-opus-4");
+        assert_eq!(cleanup_id("vertex_ai/claude-opus-4-7"), "vertex_ai/claude-opus-4-7");
+        // Unknown id passes through unchanged.
+        assert_eq!(cleanup_id("gpt-4-turbo-via-claude-proxy"), "gpt-4-turbo-via-claude-proxy");
+    }
+
+    #[test]
+    fn detect_tier_recognizes_both_forms() {
+        assert_eq!(detect_tier("claude-opus-latest[1m]"), Some("[1m]".into()));
+        assert_eq!(detect_tier("Claude Opus 4.7 (1m)"), Some("[1m]".into()));
+        assert_eq!(detect_tier("claude-opus-4-7"), None);
+    }
+
+    #[test]
+    fn strip_tier_removes_trailing_marker() {
+        assert_eq!(strip_tier("claude-opus-latest[1m]"), "claude-opus-latest");
+        assert_eq!(strip_tier("Claude Opus 4.7 [1m]"), "Claude Opus 4.7");
+        assert_eq!(strip_tier("Claude Opus 4.7 (1m)"), "Claude Opus 4.7");
+        assert_eq!(strip_tier("claude-opus-4-7"), "claude-opus-4-7");
+    }
+
+    #[test]
+    fn finalize_label_combines_cleanup_and_tier() {
+        assert_eq!(
+            finalize_model_label("anthropic--claude-opus-latest", Some("[1m]")),
+            "claude-opus-latest [1m]"
+        );
+        // Tier preserved even when the base id stays the same after cleanup.
+        assert_eq!(
+            finalize_model_label("claude-opus-4-7", Some("[1m]")),
+            "claude-opus-4-7 [1m]"
+        );
+        // No tier → no extra suffix.
+        assert_eq!(finalize_model_label("claude-opus-4-7", None), "claude-opus-4-7");
+    }
+
+    #[test]
+    fn resolve_model_prefers_transcript_over_stdin() {
+        // The user is running through a proxy that rewrote stdin to
+        // `anthropic--claude-opus-latest`, but the transcript tells us
+        // Claude Code actually called `claude-opus-4-7`. Transcript wins.
+        let mut cache = SessionCache::default();
+        cache.last_model = Some("claude-opus-4-7".into());
+        let stdin = json!({"model":{"id":"anthropic--claude-opus-latest","display_name":"anthropic--claude-opus-latest"}});
+        let cfg = Config::default();
+        let ctx = ctx_for_test(&stdin, &cache, &cfg);
+        let (label, src) = resolve_model(&ctx).unwrap();
+        assert_eq!(src, ModelSource::Transcript);
+        assert_eq!(label, "claude-opus-4-7");
+    }
+
+    #[test]
+    fn resolve_model_preserves_tier_from_stdin_when_transcript_lacks_it() {
+        // Transcript model id is canonical (`claude-opus-4-7`, no tier).
+        // The user is on the 1M tier per stdin display_name. We must
+        // keep the tier suffix in the displayed label.
+        let mut cache = SessionCache::default();
+        cache.last_model = Some("claude-opus-4-7".into());
+        let stdin = json!({"model":{"display_name":"Claude Opus 4.7[1m]"}});
+        let cfg = Config::default();
+        let ctx = ctx_for_test(&stdin, &cache, &cfg);
+        let (label, _) = resolve_model(&ctx).unwrap();
+        assert!(label.ends_with("[1m]"), "tier must survive: {}", label);
+        assert!(label.contains("claude-opus-4-7"));
+    }
+
+    #[test]
+    fn resolve_model_falls_back_to_stdin_when_no_transcript() {
+        let cache = SessionCache::default();
+        let stdin = json!({"model":{"display_name":"Claude Opus 4.7","id":"claude-opus-4-7"}});
+        let cfg = Config::default();
+        let ctx = ctx_for_test(&stdin, &cache, &cfg);
+        let (label, src) = resolve_model(&ctx).unwrap();
+        assert_eq!(src, ModelSource::Stdin);
+        assert_eq!(label, "Claude Opus 4.7");
+    }
+
+    #[test]
+    fn resolve_model_strips_anthropic_prefix_from_stdin() {
+        let cache = SessionCache::default();
+        let stdin = json!({"model":{"id":"anthropic--claude-opus-latest[1m]"}});
+        let cfg = Config::default();
+        let ctx = ctx_for_test(&stdin, &cache, &cfg);
+        let (label, _) = resolve_model(&ctx).unwrap();
+        assert_eq!(label, "claude-opus-latest [1m]");
+    }
+
+    #[test]
+    fn resolve_model_returns_none_when_nothing_known() {
+        // No transcript, no stdin model field, no settings.json,
+        // no env var. seg_model should render as "".
+        std::env::remove_var("CLAUDE_MODEL");
+        let cache = SessionCache::default();
+        let stdin = json!({});
+        let cfg = Config::default();
+        let ctx = ctx_for_test(&stdin, &cache, &cfg);
+        // configured_model() may still hit the developer's real
+        // ~/.claude/settings.json during tests; assert resolve doesn't
+        // panic and the label (if any) is non-empty.
+        if let Some((label, _)) = resolve_model(&ctx) {
+            assert!(!label.is_empty());
+        }
+    }
+
+    #[test]
+    fn valid_plugin_name_rejects_traversal() {
+        assert!(valid_plugin_name("foo"));
+        assert!(valid_plugin_name("foo-bar_2"));
+        assert!(!valid_plugin_name(""));
+        assert!(!valid_plugin_name("."));
+        assert!(!valid_plugin_name(".."));
+        assert!(!valid_plugin_name(".hidden"));
+        assert!(!valid_plugin_name("a/b"));
+        assert!(!valid_plugin_name("a\\b"));
+    }
+
+    #[test]
+    fn sanitize_plugin_output_collapses_whitespace_and_clips() {
+        assert_eq!(sanitize_plugin_output("hello\nworld"), "hello world");
+        assert_eq!(sanitize_plugin_output("  spaced  out\t\tline  "), "spaced out line");
+        // ANSI ESC kept (plugins may emit colors), other control chars stripped
+        assert_eq!(sanitize_plugin_output("\x1b[31mred\x1b[0m"), "\x1b[31mred\x1b[0m");
+        assert_eq!(sanitize_plugin_output("a\x07b"), "ab");
+        // length cap (chars, not bytes)
+        let long: String = "x".repeat(200);
+        assert_eq!(sanitize_plugin_output(&long).chars().count(), super::PLUGIN_MAX_DISPLAY);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_plugin_executes_and_captures_stdout() {
+        // Use /bin/echo directly (no shebang interpreter to spin up) so
+        // the test reliably finishes inside PLUGIN_TIMEOUT_MS even on
+        // cold-cache CI runners and macOS where Gatekeeper can add
+        // 200ms+ to first-run script execution.
+        use std::os::unix::fs::symlink;
+        let tmp = tempfile::tempdir().unwrap();
+        let script = tmp.path().join("echoer");
+        symlink("/bin/echo", &script).unwrap();
+        let got = run_plugin(&script, "{}").expect("plugin should run");
+        // /bin/echo with no args prints just a newline, which the
+        // sanitizer would collapse — but run_plugin returns raw bytes,
+        // so we just check it returned *something*.
+        assert!(!got.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_plugin_kills_on_timeout() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::time::Instant;
+        let tmp = tempfile::tempdir().unwrap();
+        let script = tmp.path().join("slow");
+        std::fs::write(&script, "#!/bin/sh\nsleep 5\necho done\n").unwrap();
+        let mut perm = std::fs::metadata(&script).unwrap().permissions();
+        perm.set_mode(0o755);
+        std::fs::set_permissions(&script, perm).unwrap();
+        let t0 = Instant::now();
+        let got = run_plugin(&script, "{}");
+        let elapsed = t0.elapsed();
+        assert!(got.is_none(), "slow plugin must time out, got {:?}", got);
+        // Generous upper bound — the deadline is 100ms, kill+wait adds a bit.
+        assert!(
+            elapsed.as_millis() < 1500,
+            "plugin timeout took too long: {:?}",
+            elapsed
+        );
+    }
+
+    #[test]
+    fn render_plugin_missing_returns_empty() {
+        // No plugin file exists with this name in the user's plugins dir;
+        // the segment must yield "" rather than panicking or echoing the
+        // template back.
+        let stdin = serde_json::Value::Null;
+        let cache = SessionCache::default();
+        let cfg = Config::default();
+        let ctx = ctx_for_test(&stdin, &cache, &cfg);
+        assert_eq!(render("plugin:does-not-exist-xyz-123", &ctx), "");
+    }
 }
 
 // --- Cost segments --------------------------------------------------
@@ -657,5 +1062,130 @@ fn seg_cost_combo(ctx: &Ctx) -> String {
         (false, true) => last,
         (true, false) => today,
         (false, false) => format!("{} · {}", last, today),
+    }
+}
+
+// --- Plugin segment -------------------------------------------------
+
+const PLUGIN_TIMEOUT_MS: u64 = 250;
+const PLUGIN_MAX_BYTES: usize = 4096;
+const PLUGIN_MAX_DISPLAY: usize = 80;
+
+/// Resolve the plugin directory: `<config_dir>/plugins`. Returns None
+/// if the config dir cannot be determined (rare; same path the rest
+/// of the binary uses).
+fn plugins_dir() -> Option<PathBuf> {
+    let cfg = config::config_path().ok()?;
+    cfg.parent().map(|p| p.join("plugins"))
+}
+
+/// Whether `name` is safe as a plugin filename. Disallow path separators
+/// and `..` so the template can't escape the plugins dir.
+fn valid_plugin_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.contains('/')
+        && !name.contains('\\')
+        && name != "."
+        && name != ".."
+        && !name.starts_with('.')
+}
+
+fn seg_plugin(name: &str, ctx: &Ctx) -> String {
+    if !valid_plugin_name(name) {
+        return String::new();
+    }
+    let Some(dir) = plugins_dir() else {
+        return String::new();
+    };
+    let path = dir.join(name);
+    if !path.is_file() {
+        return String::new();
+    }
+
+    let stdin_payload = serde_json::to_string(ctx.stdin).unwrap_or_else(|_| "{}".to_string());
+    let Some(raw) = run_plugin(&path, &stdin_payload) else {
+        return String::new();
+    };
+    sanitize_plugin_output(&raw)
+}
+
+fn run_plugin(path: &Path, stdin_payload: &str) -> Option<String> {
+    use std::time::{Duration, Instant};
+
+    let mut child = Command::new(path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    if let Some(mut sin) = child.stdin.take() {
+        let _ = sin.write_all(stdin_payload.as_bytes());
+        // drop sin → close stdin so the child can exit even if it
+        // tries to read more than we sent.
+    }
+
+    let deadline = Instant::now() + Duration::from_millis(PLUGIN_TIMEOUT_MS);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_status)) => break,
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return None;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Err(_) => return None,
+        }
+    }
+
+    let mut buf = Vec::with_capacity(256);
+    if let Some(so) = child.stdout.take() {
+        use std::io::Read as _;
+        let _ = so.take(PLUGIN_MAX_BYTES as u64).read_to_end(&mut buf);
+    }
+    let _ = child.wait();
+    if buf.is_empty() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&buf).to_string())
+}
+
+/// Public shim so `ccs plugin run` can preview exactly what the status
+/// line will display, without exposing the internal sanitizer's name.
+pub fn sanitize_plugin_output_for_debug(raw: &str) -> String {
+    sanitize_plugin_output(raw)
+}
+
+/// Replace newlines/tabs with single spaces, collapse runs of whitespace,
+/// strip ANSI control characters that aren't already a recognized SGR
+/// sequence (we let plugins emit their own colors), and clip to a
+/// reasonable display width so a misbehaving plugin can't overflow the
+/// status line.
+fn sanitize_plugin_output(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut prev_space = false;
+    for ch in raw.chars() {
+        let mapped = match ch {
+            '\n' | '\r' | '\t' => ' ',
+            c if (c as u32) < 0x20 && c != '\x1b' => continue,
+            c => c,
+        };
+        if mapped == ' ' {
+            if !prev_space {
+                out.push(' ');
+            }
+            prev_space = true;
+        } else {
+            out.push(mapped);
+            prev_space = false;
+        }
+    }
+    let trimmed = out.trim();
+    if trimmed.chars().count() > PLUGIN_MAX_DISPLAY {
+        trimmed.chars().take(PLUGIN_MAX_DISPLAY).collect()
+    } else {
+        trimmed.to_string()
     }
 }

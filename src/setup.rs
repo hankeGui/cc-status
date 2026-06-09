@@ -25,7 +25,25 @@ pub struct Args {
     pub yes: bool,
     pub check: bool,
     pub uninstall: bool,
+    /// Install / uninstall the conversational helper skill at
+    /// `~/.claude/skills/cc-status/`. None = ask the user (when interactive)
+    /// or follow defaults (skip on --check, install on --yes).
+    pub skill: Option<bool>,
 }
+
+/// Bundled at compile time so the same skill content ships with every
+/// install method (npm, curl, brew). `include_str!` paths are relative
+/// to this source file.
+const SKILL_MD: &str = include_str!("../.claude/skills/run-cc-status/SKILL.md");
+const SKILL_DRIVER: &str = include_str!("../.claude/skills/run-cc-status/driver.sh");
+
+/// User-facing skill location. We use a stable, human-readable name
+/// (`cc-status`) rather than the dev-time `run-cc-status` because the
+/// installed skill is for *operating* cc-status, not "running this
+/// repo as a unit." The driver path inside SKILL.md is only correct
+/// during repo development; the installed copy of SKILL.md gets a
+/// short header pointing at the new path.
+const INSTALLED_SKILL_DIRNAME: &str = "cc-status";
 
 pub fn run(args: Args) -> Result<()> {
     println!("{B}cc-status setup{R}", B = BOLD, R = RESET);
@@ -84,7 +102,11 @@ pub fn run(args: Args) -> Result<()> {
     };
 
     if args.uninstall {
-        return uninstall(&settings_path, settings);
+        let r = uninstall(&settings_path, settings);
+        // Always attempt to remove the skill on uninstall — quiet no-op
+        // if it isn't there.
+        let _ = uninstall_skill(&claude_dir);
+        return r;
     }
 
     let desired_command = pick_command()?;
@@ -192,6 +214,13 @@ pub fn run(args: Args) -> Result<()> {
         .with_context(|| format!("write {}", settings_path.display()))?;
     println!("{}✓{} settings.json updated", GREEN, RESET);
     println!();
+
+    // Skill installation. Default: ask the user when interactive.
+    let install_skill = decide_skill_install(&args)?;
+    if install_skill {
+        install_skill_files(&claude_dir)?;
+    }
+
     println!("Restart Claude Code to see the new status line.");
     println!();
     println!("{}Useful next steps:{}", DIM, RESET);
@@ -199,6 +228,118 @@ pub fn run(args: Args) -> Result<()> {
     println!("  ccs status           — full session dashboard");
     println!("  ccs mode list        — available display modes");
     println!("  ccs mode detailed    — switch to a 3-line layout");
+    if install_skill {
+        println!();
+        println!(
+            "{}Conversational helper installed.{} Inside Claude Code, just say things like",
+            DIM, RESET
+        );
+        println!("  \"switch my status line to detailed\"");
+        println!("  \"add today's cost to my status bar\"");
+        println!("  \"build me a plugin that shows the unread issue count\"");
+        println!("Claude will pick up the skill and run the right commands for you.");
+    }
+    Ok(())
+}
+
+/// Return true if the user wants the skill installed. Honors:
+///   * Explicit `--skill / --no-skill` flag (`args.skill = Some(...)`)
+///   * `--yes` (non-interactive: install)
+///   * Otherwise prompt y/N, default = yes.
+fn decide_skill_install(args: &Args) -> Result<bool> {
+    if let Some(b) = args.skill {
+        return Ok(b);
+    }
+    if args.yes {
+        return Ok(true);
+    }
+    print!(
+        "Install the conversational helper skill (~/.claude/skills/{}/)?\n  Lets Claude help users switch modes / add segments / build plugins from\n  inside a Claude Code conversation. [Y/n]: ",
+        INSTALLED_SKILL_DIRNAME
+    );
+    io::stdout().flush()?;
+    let mut buf = String::new();
+    io::stdin().read_line(&mut buf)?;
+    let s = buf.trim();
+    Ok(s.is_empty() || s.eq_ignore_ascii_case("y"))
+}
+
+fn install_skill_files(claude_dir: &std::path::Path) -> Result<()> {
+    let skill_dir = claude_dir.join("skills").join(INSTALLED_SKILL_DIRNAME);
+    std::fs::create_dir_all(&skill_dir)
+        .with_context(|| format!("create {}", skill_dir.display()))?;
+
+    // The bundled SKILL.md is written for someone working *inside the
+    // repo* — its driver path is `./target/release/ccs` (and `sh
+    // .claude/skills/run-cc-status/driver.sh`). On a user's machine
+    // those paths don't exist; the binary is on PATH as `ccs` and the
+    // driver lives next to SKILL.md. Rewrite both references.
+    let driver_user_path = skill_dir.join("driver.sh");
+    let user_skill_md = SKILL_MD
+        .replace(
+            "sh .claude/skills/run-cc-status/driver.sh",
+            &format!("sh {}", driver_user_path.display()),
+        )
+        .replace("CCS=/path/to/ccs", "CCS=ccs")
+        .replace(
+            "default uses ./target/release/ccs (build with `cargo build --release`)",
+            "uses `ccs` from the user's PATH (installed by npm / curl / brew / cargo)",
+        )
+        // Catch any stragglers — repo-internal paths that survive the
+        // targeted replaces above. The user runs `ccs` from PATH; the
+        // skill must never tell them to look under `target/release/`.
+        .replace("./target/release/ccs", "ccs")
+        .replace(
+            "`cargo build --release` (in the repo root)",
+            "reinstall `ccs` (e.g. `npm install -g @cc-status-line/cli` or `ccs upgrade`)",
+        );
+
+    let skill_md = skill_dir.join("SKILL.md");
+    std::fs::write(&skill_md, user_skill_md)
+        .with_context(|| format!("write {}", skill_md.display()))?;
+
+    // Driver also needs its `CCS=...` default to point at PATH and
+    // its usage example to reference the installed location.
+    let user_driver = SKILL_DRIVER
+        .replace(
+            "CCS=\"${CCS:-./target/release/ccs}\"",
+            "CCS=\"${CCS:-ccs}\"",
+        )
+        .replace(
+            "sh .claude/skills/run-cc-status/driver.sh",
+            &format!("sh {}", driver_user_path.display()),
+        )
+        .replace(
+            "By default uses ./target/release/ccs (build with `cargo build --release`).",
+            "By default uses `ccs` from your PATH (installed by npm / curl / brew / cargo).",
+        );
+    std::fs::write(&driver_user_path, user_driver)
+        .with_context(|| format!("write {}", driver_user_path.display()))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perm = std::fs::metadata(&driver_user_path)?.permissions();
+        perm.set_mode(0o755);
+        std::fs::set_permissions(&driver_user_path, perm)?;
+    }
+    println!(
+        "{}✓{} skill installed at {}",
+        GREEN,
+        RESET,
+        skill_dir.display()
+    );
+    Ok(())
+}
+
+fn uninstall_skill(claude_dir: &std::path::Path) -> Result<()> {
+    let skill_dir = claude_dir.join("skills").join(INSTALLED_SKILL_DIRNAME);
+    if !skill_dir.exists() {
+        return Ok(());
+    }
+    std::fs::remove_dir_all(&skill_dir)
+        .with_context(|| format!("remove {}", skill_dir.display()))?;
+    println!("{}✓{} skill removed from {}", GREEN, RESET, skill_dir.display());
     Ok(())
 }
 

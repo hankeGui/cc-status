@@ -84,6 +84,7 @@ pub fn update(path: &Path, cache: &mut SessionCache) -> Result<()> {
         cache.total_cache_creation = 0;
         cache.first_turn_ms = None;
         cache.last_turn_ms = None;
+        cache.last_model = None;
     }
     if size == cache.file_offset {
         return Ok(());
@@ -113,6 +114,17 @@ fn process_entry(v: &Value, cache: &mut SessionCache) {
     let entry_type = v.get("type").and_then(|x| x.as_str()).unwrap_or("");
 
     if entry_type == "assistant" {
+        // Capture the canonical model id Claude Code actually called.
+        // Claude Code sometimes injects synthetic assistant entries
+        // (slash-command output, system replies) with `model:
+        // "<synthetic>"` or other angle-bracketed sentinels — those
+        // aren't real model invocations, skip them.
+        if let Some(m) = v.pointer("/message/model").and_then(|x| x.as_str()) {
+            if !m.is_empty() && !m.starts_with('<') {
+                cache.last_model = Some(m.to_string());
+            }
+        }
+
         if let Some(usage) = v.pointer("/message/usage") {
             let input = usage
                 .get("input_tokens")
@@ -406,11 +418,84 @@ mod tests {
     }
 
     #[test]
+    fn dedupe_does_not_drop_skill_in_smaller_copy() {
+        // Regression: the same assistant message can appear multiple times
+        // in the JSONL (streaming partial → final, sidechain replay). The
+        // earlier token-dedupe path used `return` to skip duplicate copies,
+        // which also skipped any tool_use blocks present only in those
+        // copies — silently dropping Skill / MCP counts. Layout:
+        //
+        //   line A: msg_X, total=29195, no tool_use            → seen[X]=29195
+        //   line B: msg_X, total=29195, Skill(sap-jira)        → must still count Skill
+        //   line C: msg_X, total=29415 (upgrade), no tool_use  → must credit only delta
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_lines(
+            &tmp,
+            &[
+                r#"{"type":"assistant","timestamp":"2026-06-04T10:00:00Z","requestId":"req_1","message":{"id":"msg_X","usage":{"input_tokens":29195,"output_tokens":0}}}"#,
+                r#"{"type":"assistant","timestamp":"2026-06-04T10:00:01Z","requestId":"req_1","message":{"id":"msg_X","usage":{"input_tokens":29195,"output_tokens":0},"content":[{"type":"tool_use","id":"toolu_A","name":"Skill","input":{"skill":"sap-jira"}}]}}"#,
+                r#"{"type":"assistant","timestamp":"2026-06-04T10:00:02Z","requestId":"req_1","message":{"id":"msg_X","usage":{"input_tokens":29415,"output_tokens":0}}}"#,
+            ],
+        );
+        let mut cache = SessionCache::default();
+        update(&path, &mut cache).unwrap();
+        assert_eq!(
+            cache.skill_counts.get("sap-jira"),
+            Some(&1),
+            "Skill in a duplicate copy must still be counted"
+        );
+        assert_eq!(
+            cache.total_input, 29415,
+            "duplicate must not double-count tokens; upgrade must credit only the delta"
+        );
+    }
+
+    #[test]
     fn missing_file_is_noop() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("does-not-exist.jsonl");
         let mut cache = SessionCache::default();
         update(&path, &mut cache).expect("missing file should not error");
         assert_eq!(cache.total_input, 0);
+        assert!(cache.last_model.is_none());
+    }
+
+    #[test]
+    fn captures_message_model_from_transcript() {
+        // The status line resolves the displayed model id from
+        // cache.last_model first — making sure transcripts populate it
+        // is the whole point.
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_lines(
+            &tmp,
+            &[
+                r#"{"type":"assistant","timestamp":"2026-06-09T10:00:00Z","message":{"model":"claude-opus-4-7","usage":{"input_tokens":1,"output_tokens":1}}}"#,
+            ],
+        );
+        let mut cache = SessionCache::default();
+        update(&path, &mut cache).unwrap();
+        assert_eq!(cache.last_model.as_deref(), Some("claude-opus-4-7"));
+    }
+
+    #[test]
+    fn skips_synthetic_model_marker() {
+        // Claude Code injects entries like `model: "<synthetic>"` for
+        // slash-command outputs. Those aren't real model invocations
+        // and must not overwrite a real model id we've already seen.
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_lines(
+            &tmp,
+            &[
+                r#"{"type":"assistant","timestamp":"2026-06-09T10:00:00Z","message":{"model":"claude-opus-4-7","usage":{"input_tokens":1,"output_tokens":1}}}"#,
+                r#"{"type":"assistant","timestamp":"2026-06-09T10:00:01Z","message":{"model":"<synthetic>","usage":{"input_tokens":0,"output_tokens":0}}}"#,
+            ],
+        );
+        let mut cache = SessionCache::default();
+        update(&path, &mut cache).unwrap();
+        assert_eq!(
+            cache.last_model.as_deref(),
+            Some("claude-opus-4-7"),
+            "real model id from line 1 must survive line 2's <synthetic>"
+        );
     }
 }

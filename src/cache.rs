@@ -42,6 +42,15 @@ pub struct SessionCache {
     /// calls. Token totals use a different dedupe path; see `seen`.
     #[serde(default)]
     pub seen_tools: HashSet<String>,
+    /// Most recent `message.model` value seen in the transcript. This
+    /// is the canonical model id that Claude Code actually called
+    /// (e.g. `claude-opus-4-7`) — taking precedence over whatever
+    /// `model.id` / `model.display_name` Claude Code passed on stdin,
+    /// which can be rewritten by intermediaries (proxies, Bedrock,
+    /// Vertex). `None` until the first non-synthetic assistant turn
+    /// has been parsed.
+    #[serde(default)]
+    pub last_model: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]

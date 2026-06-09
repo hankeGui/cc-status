@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>cc-status mode editor</title>
+<style>
+  :root {
+    --bg: #0e1115; --panel: #161a20; --border: #2a3038;
+    --fg: #e6edf3; --dim: #7d8590; --cyan: #5eb3ff; --magenta: #c678dd;
+    --green: #56d364; --yellow: #e3b341; --red: #f85149;
+    --accent: #1f6feb;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px;
+    background: var(--bg); color: var(--fg);
+    font: 14px ui-monospace, "SF Mono", Monaco, Menlo, Consolas, monospace;
+  }
+  h1 { font-size: 18px; margin: 0 0 16px; }
+  h2 { font-size: 13px; margin: 0 0 8px; color: var(--dim); text-transform: uppercase; letter-spacing: 1px; font-weight: 600; }
+  .tagline { color: var(--dim); margin-bottom: 24px; font-size: 12px; }
+  .row { display: flex; gap: 24px; align-items: stretch; }
+  .row > * { flex: 1; }
+
+  /* Mode selector */
+  .modes-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; align-items: center; }
+  .mode-tab {
+    padding: 6px 12px; border: 1px solid var(--border); background: var(--panel);
+    color: var(--fg); border-radius: 6px; cursor: pointer; font-size: 13px;
+  }
+  .mode-tab.active { border-color: var(--cyan); color: var(--cyan); }
+  .mode-tab:hover { border-color: var(--cyan); }
+  .mode-tab .count { color: var(--dim); margin-left: 6px; font-size: 11px; }
+  .new-mode {
+    padding: 6px 10px; border: 1px dashed var(--border); background: transparent;
+    color: var(--dim); border-radius: 6px; cursor: pointer; font-size: 13px;
+  }
+  .new-mode:hover { color: var(--green); border-color: var(--green); }
+
+  /* Mode editor card */
+  .mode-card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 16px; margin-bottom: 16px;
+  }
+  .mode-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .mode-name {
+    flex: 1; padding: 4px 8px; background: transparent; border: 1px solid transparent;
+    color: var(--cyan); font: 600 14px ui-monospace, monospace;
+  }
+  .mode-name:focus { outline: none; border-color: var(--cyan); border-radius: 4px; }
+  .icon-btn {
+    background: transparent; border: 1px solid var(--border); color: var(--dim);
+    padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 12px;
+  }
+  .icon-btn:hover { color: var(--red); border-color: var(--red); }
+  .icon-btn.add { color: var(--green); border-color: var(--green); }
+  .icon-btn.add:hover { background: rgba(86, 211, 100, 0.1); }
+
+  /* Lines */
+  .line {
+    display: flex; align-items: center; gap: 6px; padding: 8px;
+    border: 1px dashed var(--border); border-radius: 4px; margin-bottom: 6px;
+    min-height: 44px; flex-wrap: wrap;
+  }
+  .line.drag-over { border-color: var(--accent); background: rgba(31, 111, 235, 0.08); }
+  .line-label {
+    color: var(--dim); font-size: 11px; margin-right: 8px; user-select: none; min-width: 42px;
+  }
+  .line-empty { color: var(--dim); font-style: italic; font-size: 12px; }
+  .line-actions { margin-left: auto; display: flex; gap: 4px; }
+
+  /* Segment chip */
+  .seg {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 4px 8px; border-radius: 4px; cursor: grab; user-select: none;
+    border: 1px solid var(--border); background: var(--bg); color: var(--cyan);
+    font-size: 12px;
+  }
+  .seg.plugin { color: var(--magenta); }
+  .seg.unknown { color: var(--yellow); border-color: var(--yellow); }
+  .seg.dragging { opacity: 0.4; }
+  .seg .x {
+    margin-left: 4px; color: var(--dim); cursor: pointer; font-size: 12px;
+  }
+  .seg .x:hover { color: var(--red); }
+
+  /* Palette */
+  .palette {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 16px; min-height: 200px;
+  }
+  .palette.drag-over { border-color: var(--red); background: rgba(248, 81, 73, 0.04); }
+  .palette-group { margin-bottom: 14px; }
+  .palette-group:last-child { margin-bottom: 0; }
+  .palette-segs { display: flex; gap: 6px; flex-wrap: wrap; }
+
+  /* Preview */
+  .preview {
+    background: #000; padding: 12px 16px; border-radius: 6px;
+    font: 13px ui-monospace, monospace; color: #d0d4d8;
+    white-space: pre-wrap; word-break: break-all; margin-top: 12px;
+    border: 1px solid var(--border);
+  }
+  .preview-empty { color: var(--dim); font-style: italic; }
+
+  /* Save bar — pinned to viewport bottom so it's always reachable.
+     `position: fixed` (not sticky) keeps it out of the document flow
+     so it doesn't visually slot between the mode editor and the
+     palette when the page is short. */
+  .savebar {
+    position: fixed; left: 24px; right: 24px; bottom: 16px;
+    padding: 12px 16px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    display: flex; align-items: center; gap: 12px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    z-index: 10;
+  }
+  body { padding-bottom: 80px; } /* leave room for the fixed savebar */
+  .savebar .status { flex: 1; color: var(--dim); font-size: 12px; }
+  .btn {
+    padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px;
+    border: 1px solid var(--accent); background: var(--accent); color: #fff;
+  }
+  .btn:hover { filter: brightness(1.1); }
+  .btn.secondary { background: transparent; color: var(--dim); border-color: var(--border); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* Toast */
+  #toast {
+    position: fixed; right: 24px; bottom: 24px; max-width: 360px;
+    padding: 12px 16px; border-radius: 6px;
+    background: var(--green); color: #000; font-size: 13px;
+    opacity: 0; transition: opacity 0.2s; pointer-events: none;
+  }
+  #toast.show { opacity: 1; }
+  #toast.error { background: var(--red); color: #fff; }
+</style>
+</head>
+<body>
+<h1>cc-status · mode editor</h1>
+<div class="tagline">drag segments between modes and the palette · click <b>Save</b> to write config.toml</div>
+
+<div class="modes-bar" id="modes-bar"></div>
+
+<div class="row">
+  <div>
+    <div id="mode-editor"></div>
+  </div>
+</div>
+
+<div>
+  <h2>Segment palette</h2>
+  <div class="palette" id="palette" data-line="palette"></div>
+</div>
+
+<div class="savebar">
+  <span class="status" id="status">loaded · drag to edit</span>
+  <button class="btn secondary" id="reset">Reset</button>
+  <button class="btn" id="save">Save</button>
+</div>
+<div id="toast"></div>
+
+<script>
+"use strict";
+
+// Token comes from the URL; the backend will reject API calls without it.
+const params = new URLSearchParams(location.search);
+const TOKEN = params.get("token") || "";
+
+let state = null;        // current edit state
+let original = null;     // last saved state (for Reset)
+let activeMode = null;
+
+async function api(path, body) {
+  // Token rides in the query string only. Keeping headers to the
+  // "simple request" set (just Content-Type for POST) avoids triggering
+  // a CORS preflight on every call. The server still enforces the
+  // token + Host allowlist; URL leakage isn't a concern because the
+  // listener is bound to 127.0.0.1.
+  const url = path + "?token=" + encodeURIComponent(TOKEN);
+  const init = body
+    ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
+    : {};
+  const r = await fetch(url, init);
+  if (!r.ok) throw new Error(path + ": " + r.status);
+  return r.json();
+}
+
+function toast(msg, isError) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.classList.toggle("error", !!isError);
+  t.classList.add("show");
+  setTimeout(() => t.classList.remove("show"), 2400);
+}
+
+function deepClone(o) { return JSON.parse(JSON.stringify(o)); }
+
+function paletteSegs() {
+  // Built-in plus user plugins. Filter out segments already in the
+  // active mode? No — segments can repeat; let the user decide.
+  return state.segments.concat(
+    state.plugins.map(p => ({
+      name: "plugin:" + p.name,
+      kind: "plugin",
+      example: p.example || "",
+      description: p.executable ? "your plugin" : "your plugin (not executable)",
+      executable: p.executable !== false,
+    }))
+  );
+}
+
+function rerender() {
+  // Mode tabs
+  const bar = document.getElementById("modes-bar");
+  bar.innerHTML = "";
+  Object.keys(state.modes).sort().forEach(name => {
+    const tab = document.createElement("button");
+    tab.className = "mode-tab" + (name === activeMode ? " active" : "");
+    tab.textContent = name;
+    const count = document.createElement("span");
+    count.className = "count";
+    count.textContent = state.modes[name].lines.length + "L";
+    tab.appendChild(count);
+    tab.onclick = () => { activeMode = name; rerender(); };
+    bar.appendChild(tab);
+  });
+  const newBtn = document.createElement("button");
+  newBtn.className = "new-mode"; newBtn.textContent = "+ new mode";
+  newBtn.onclick = newMode;
+  bar.appendChild(newBtn);
+
+  // Mode editor
+  const editor = document.getElementById("mode-editor");
+  editor.innerHTML = "";
+  if (!activeMode) return;
+  const mode = state.modes[activeMode];
+
+  const card = document.createElement("div");
+  card.className = "mode-card";
+
+  const header = document.createElement("div");
+  header.className = "mode-header";
+
+  const nameInput = document.createElement("input");
+  nameInput.className = "mode-name";
+  nameInput.value = activeMode;
+  nameInput.onchange = (e) => renameMode(activeMode, e.target.value);
+  header.appendChild(nameInput);
+
+  const setActive = document.createElement("button");
+  setActive.className = "icon-btn add";
+  setActive.textContent = state.current_mode === activeMode ? "✓ active" : "set active";
+  setActive.disabled = state.current_mode === activeMode;
+  setActive.onclick = () => { state.current_mode = activeMode; rerender(); };
+  header.appendChild(setActive);
+
+  const delBtn = document.createElement("button");
+  delBtn.className = "icon-btn"; delBtn.textContent = "delete mode";
+  delBtn.onclick = () => deleteMode(activeMode);
+  header.appendChild(delBtn);
+
+  card.appendChild(header);
+
+  // Lines
+  mode.lines.forEach((tokens, i) => card.appendChild(renderLine(i, tokens)));
+
+  const addLineBtn = document.createElement("button");
+  addLineBtn.className = "icon-btn add";
+  addLineBtn.textContent = "+ add line";
+  addLineBtn.onclick = () => { mode.lines.push([]); rerender(); };
+  card.appendChild(addLineBtn);
+
+  // Preview (joined, frontend-side)
+  const preview = document.createElement("div");
+  preview.className = "preview";
+  const previewText = mode.lines
+    .map(line => line.map(t => previewSegment(t)).filter(Boolean).join(" "))
+    .filter(Boolean)
+    .join("\n");
+  if (previewText.trim()) preview.textContent = previewText;
+  else { preview.classList.add("preview-empty"); preview.textContent = "(empty mode — drag segments here)"; }
+  card.appendChild(preview);
+
+  editor.appendChild(card);
+
+  // Re-bind palette
+  const pal = document.getElementById("palette");
+  pal.innerHTML = "";
+
+  const builtinGroup = document.createElement("div");
+  builtinGroup.className = "palette-group";
+  builtinGroup.innerHTML = '<h2>Built-in</h2>';
+  const builtinSegs = document.createElement("div"); builtinSegs.className = "palette-segs";
+  state.segments.forEach(s => builtinSegs.appendChild(makeChip(s.name, "builtin")));
+  builtinGroup.appendChild(builtinSegs);
+  pal.appendChild(builtinGroup);
+
+  if (state.plugins.length) {
+    const pluginGroup = document.createElement("div");
+    pluginGroup.className = "palette-group";
+    pluginGroup.innerHTML = '<h2>Your plugins</h2>';
+    const pluginSegs = document.createElement("div"); pluginSegs.className = "palette-segs";
+    state.plugins.forEach(p => {
+      const chip = makeChip("plugin:" + p.name, "plugin");
+      if (!p.executable) {
+        chip.classList.add("unknown");
+        chip.title = "not executable — chmod +x";
+      }
+      pluginSegs.appendChild(chip);
+    });
+    pluginGroup.appendChild(pluginSegs);
+    pal.appendChild(pluginGroup);
+  }
+
+  bindPaletteAsDropTarget(pal);
+}
+
+function renderLine(i, tokens) {
+  const line = document.createElement("div");
+  line.className = "line";
+  line.dataset.line = i;
+
+  const label = document.createElement("span");
+  label.className = "line-label";
+  label.textContent = "line " + (i + 1);
+  line.appendChild(label);
+
+  if (!tokens.length) {
+    const ph = document.createElement("span");
+    ph.className = "line-empty";
+    ph.textContent = "drag a segment here";
+    line.appendChild(ph);
+  }
+  tokens.forEach((tok, j) => line.appendChild(makeChip(tok, classifyToken(tok), { line: i, idx: j })));
+
+  const acts = document.createElement("span");
+  acts.className = "line-actions";
+  if (i > 0 || state.modes[activeMode].lines.length > 1) {
+    const rm = document.createElement("button");
+    rm.className = "icon-btn"; rm.textContent = "remove line";
+    rm.onclick = () => { state.modes[activeMode].lines.splice(i, 1); rerender(); };
+    acts.appendChild(rm);
+  }
+  line.appendChild(acts);
+
+  bindLineAsDropTarget(line, i);
+  return line;
+}
+
+function classifyToken(tok) {
+  if (tok.startsWith("plugin:")) return "plugin";
+  const known = state.segments.some(s => s.name === tok);
+  return known ? "builtin" : "unknown";
+}
+
+function makeChip(name, kind, source) {
+  // `source` undefined for palette chips, set for in-mode chips
+  const chip = document.createElement("span");
+  chip.className = "seg" + (kind === "plugin" ? " plugin" : "")
+    + (kind === "unknown" ? " unknown" : "");
+  chip.draggable = true;
+  chip.textContent = "{" + name + "}";
+
+  if (source) {
+    const x = document.createElement("span");
+    x.className = "x"; x.textContent = "×";
+    x.onclick = (e) => {
+      e.stopPropagation();
+      state.modes[activeMode].lines[source.line].splice(source.idx, 1);
+      rerender();
+    };
+    chip.appendChild(x);
+  }
+
+  chip.addEventListener("dragstart", (e) => {
+    chip.classList.add("dragging");
+    const payload = { name };
+    if (source) Object.assign(payload, source);
+    e.dataTransfer.setData("application/json", JSON.stringify(payload));
+    e.dataTransfer.effectAllowed = source ? "move" : "copy";
+  });
+  chip.addEventListener("dragend", () => chip.classList.remove("dragging"));
+  return chip;
+}
+
+function bindLineAsDropTarget(line, lineIdx) {
+  line.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    line.classList.add("drag-over");
+  });
+  line.addEventListener("dragleave", () => line.classList.remove("drag-over"));
+  line.addEventListener("drop", (e) => {
+    e.preventDefault();
+    line.classList.remove("drag-over");
+    const data = JSON.parse(e.dataTransfer.getData("application/json"));
+    const lines = state.modes[activeMode].lines;
+    if (data.line !== undefined) {
+      // moving from another in-mode position
+      const [tok] = lines[data.line].splice(data.idx, 1);
+      lines[lineIdx].push(tok);
+    } else {
+      lines[lineIdx].push(data.name);
+    }
+    rerender();
+  });
+}
+
+function bindPaletteAsDropTarget(pal) {
+  pal.addEventListener("dragover", (e) => {
+    // Only react when source comes from a mode line — palette → palette is no-op
+    e.preventDefault();
+    pal.classList.add("drag-over");
+  });
+  pal.addEventListener("dragleave", () => pal.classList.remove("drag-over"));
+  pal.addEventListener("drop", (e) => {
+    e.preventDefault();
+    pal.classList.remove("drag-over");
+    const data = JSON.parse(e.dataTransfer.getData("application/json"));
+    if (data.line === undefined) return;     // dragging from palette: do nothing
+    state.modes[activeMode].lines[data.line].splice(data.idx, 1);
+    rerender();
+  });
+}
+
+function previewSegment(tok) {
+  if (tok.startsWith("plugin:")) {
+    const name = tok.slice("plugin:".length);
+    const p = state.plugins.find(x => x.name === name);
+    return p && p.example ? p.example : "{" + tok + "}";
+  }
+  const s = state.segments.find(x => x.name === tok);
+  return s ? s.example : "{" + tok + "}";
+}
+
+function newMode() {
+  let n = "untitled", i = 1;
+  while (state.modes[n]) n = "untitled-" + (++i);
+  state.modes[n] = { lines: [[]] };
+  activeMode = n;
+  rerender();
+}
+
+function renameMode(oldName, newName) {
+  newName = newName.trim();
+  if (!newName || newName === oldName) { rerender(); return; }
+  if (state.modes[newName]) { toast("a mode named '" + newName + "' already exists", true); rerender(); return; }
+  state.modes[newName] = state.modes[oldName];
+  delete state.modes[oldName];
+  if (state.current_mode === oldName) state.current_mode = newName;
+  activeMode = newName;
+  rerender();
+}
+
+function deleteMode(name) {
+  if (Object.keys(state.modes).length === 1) {
+    toast("can't delete the last mode", true);
+    return;
+  }
+  delete state.modes[name];
+  if (state.current_mode === name) state.current_mode = Object.keys(state.modes)[0];
+  activeMode = Object.keys(state.modes)[0];
+  rerender();
+}
+
+document.getElementById("save").onclick = async () => {
+  // Convert state.modes back to {name: {lines: ["{a} {b}", "..."]}} (server expects template strings)
+  const payload = {
+    current_mode: state.current_mode,
+    modes: {},
+  };
+  for (const [name, mode] of Object.entries(state.modes)) {
+    payload.modes[name] = { lines: mode.lines.map(line =>
+      line.map(t => "{" + t + "}").join(" ")
+    ).filter(s => s.length > 0) };
+    if (!payload.modes[name].lines.length) payload.modes[name].lines = [""];
+  }
+  document.getElementById("save").disabled = true;
+  document.getElementById("status").textContent = "saving...";
+  try {
+    await api("/api/save", payload);
+    original = deepClone(state);
+    toast("saved · server will exit in 5s — close this tab");
+    document.getElementById("status").textContent = "saved at " + new Date().toLocaleTimeString();
+  } catch (e) {
+    toast("save failed: " + e.message, true);
+    document.getElementById("status").textContent = "save failed";
+  } finally {
+    document.getElementById("save").disabled = false;
+  }
+};
+
+document.getElementById("reset").onclick = () => {
+  state = deepClone(original);
+  activeMode = state.current_mode;
+  rerender();
+  toast("reverted to last save");
+};
+
+(async function init() {
+  try {
+    const fetched = await api("/api/state");
+    // server sends modes as {name: {lines: ["{a} {b}", ...]}};
+    // we want lines as [[a,b],...] for easier drag/drop
+    state = {
+      current_mode: fetched.current_mode,
+      modes: {},
+      segments: fetched.segments,
+      plugins: fetched.plugins,
+    };
+    for (const [n, m] of Object.entries(fetched.modes)) {
+      state.modes[n] = { lines: m.lines.map(parseTemplate) };
+    }
+    original = deepClone(state);
+    activeMode = state.current_mode;
+    rerender();
+  } catch (e) {
+    document.body.innerHTML = "<h1 style='color:#f85149'>Failed to load: " + e.message + "</h1>";
+  }
+})();
+
+function parseTemplate(line) {
+  // Extract only the {name} tokens — literal text between them is dropped
+  // because the editor only knows how to round-trip segment chips. Users
+  // who want literal text inline should still use `ccs mode edit`.
+  const out = [];
+  const re = /\{([^}]+)\}/g;
+  let m;
+  while ((m = re.exec(line)) !== null) out.push(m[1]);
+  return out;
+}
+</script>
+</body>
+</html>

@@ -11,12 +11,12 @@
 📦 **npm**: `npm install -g @cc-status-line/cli`
 
 ```
-~/hanke-dev/cc-status main  Claude Opus 4.7  ctx 86% █████▏  154.6k/950k
+~/hanke-dev/cc-status main  claude-opus-4-7  ctx 86% █████▏  154.6k/950k
 ```
 
 ```
-~/hanke-dev/cc-status main  Claude Opus 4.7
-ctx 86% █████▏ 154.6k/950k  ↑154.6k ↓185 +687 🎯99%  cache 4:47  hit 96%  🔥 32.4k/min
+~/hanke-dev/cc-status main  claude-opus-4-7  ctx 86% █████▏ 154.6k/950k
+12m  ↑154.6k ↓185 +687 🎯99%  last $0.012  sess $1.42  hit 96%  🔥 32.4k/min
 skills: jira×3 wiki×1   mcp: github×2
 ```
 
@@ -37,11 +37,15 @@ cc-status answers all of these in three lines and lets you switch modes with a s
 
 ## Highlights
 
-- **7 built-in modes** (`compact` / `minimal` / `detailed` / `cost` / `tokens` / `tools` / `debug`) plus user-defined modes via `ccs mode add` / `append` / `edit`.
-- **17 segments** ranging from `{dir}` and `{git}` to `{cost_today}` / `{burn}` / `{cache_ttl}`. Mix and match.
+- **8 built-in modes** (`balanced` (default) / `compact` / `minimal` / `detailed` / `cost` / `tokens` / `tools` / `debug`) plus user-defined modes via `ccs mode add` / `append` / `edit`.
+- **18 segments** ranging from `{dir}` / `{git}` to `{cost_today}` / `{burn}` / `{session_age}` / `{cache_ttl}`. Plus `{plugin:NAME}` for your own.
+- **Custom `{plugin:NAME}` segments** — drop an executable, scaffold via `ccs plugin new`, debug via `ccs plugin run`, health-check via `ccs plugin doctor`. 250 ms hard timeout, ANSI-aware sanitize, fault-isolated.
+- **Drag-and-drop mode editor** — `ccs config edit` opens a short-lived 127.0.0.1 page where you arrange segments visually; Save writes `config.toml`. Pure stdlib, no new deps.
+- **Conversational helper skill** — `ccs setup` installs a [Claude Code skill](https://docs.claude.com/en/docs/claude-code/skills) so you can just say "switch to detailed" or "build me a plugin that shows X" inside a Claude Code chat and have it done for you.
+- **Three-stage model resolution**: transcript `message.model` → stdin → settings.json — proxies / Bedrock / Vertex can't lie about what model Claude Code actually called. `[1m]` tier preserved across stages.
 - **Per-model USD pricing** with built-in defaults for Opus / Sonnet / Haiku 4.x and a 1M-context tier multiplier. Override per model in `config.toml`.
 - **`ccs cost`** prints a multi-day ASCII dashboard with per-day bars, per-model breakdowns, and `--debug` per-file reconciliation when numbers don't match another tool.
-- **`ccs status`** is a self-explanatory dashboard for the current session — every number labeled, every unit annotated.
+- **`ccs status`** is a self-explanatory dashboard for the current session — every number labeled, every unit annotated, model line shows the data source.
 - **`ccs setup`** writes the `statusLine` block to `~/.claude/settings.json` for you (with backup), so users don't have to hand-edit JSON.
 - **Optional Unix-socket daemon** for sub-millisecond renders on slow git repos. `ccs render` falls back to inline rendering if the daemon isn't running.
 - **Streaming-aware token accounting**: matches `ccusage` and `cc-switch`'s `(message.id, requestId)` dedupe so we don't double-count partial / final stream events.
@@ -128,7 +132,9 @@ cp target/release/ccs ~/.local/bin/
 ccs setup
 ```
 
-This inspects `~/.claude/settings.json`, shows the proposed `statusLine` change, prompts y/N, and writes a backup before saving. Pass `--yes` to skip the prompt or `--check` to inspect without modifying. To remove the line later: `ccs setup --uninstall`.
+This inspects `~/.claude/settings.json`, shows the proposed `statusLine` change, prompts y/N, and writes a backup before saving. It also offers to install a **conversational helper skill** at `~/.claude/skills/cc-status/` — once installed, you can say things like "switch my status line to detailed", "add today's cost to my bar", or "build me a plugin that shows the unread issue count" inside any Claude Code conversation, and Claude will run the right `ccs` commands for you.
+
+Pass `--yes` to skip the prompt or `--check` to inspect without modifying. Force or skip the skill with `--with-skill` / `--no-skill`. To remove everything later: `ccs setup --uninstall` (cleans up both settings and the skill).
 
 If you'd rather edit by hand:
 
@@ -211,6 +217,7 @@ Prints a colored cheat-sheet of every segment, every color, every glyph.
 | `{cache_ttl}` | `cache 3:42` | Prompt-cache 5-min TTL countdown (red < 1 min) |
 | `{hit_rate}` | `hit 96%` | Session-wide cache hit rate |
 | `{burn}` | `🔥 32.4k/min` | Session-average token rate |
+| `{session_age}` | `1h23m` | Wall-clock duration since the first assistant turn (s/m/h/d) |
 | `{skills}` | `skills: jira×3 wiki×1` | Skill calls, top 4 by count |
 | `{mcp}` | `mcp: github×2` | MCP-server calls, top 4 |
 | `{cost_last}` | `last $0.012` | USD cost of the last turn (current model price) |
@@ -219,6 +226,101 @@ Prints a colored cheat-sheet of every segment, every color, every glyph.
 | `{cost_week}` | `7d $24.50` | USD cost over the last 7 days |
 | `{cost}` | `last $0.012 · today $4.18` | Combo: `cost_last + cost_today` |
 | `{mode}` | `[detailed]` | Current mode label |
+| `{plugin:NAME}` | *(plugin output)* | Runs `<config>/plugins/NAME`, captures stdout (see Plugins below) |
+
+## Conversational mode (let Claude drive cc-status for you)
+
+`ccs setup` offers to install a Claude Code **skill** at `~/.claude/skills/cc-status/`. Once it's there, you don't have to remember any commands — just talk to Claude:
+
+- "switch my status line to detailed"
+- "add today's cost to my status bar"
+- "build me a plugin that shows the unread issue count from `~/.todo`"
+- "my status line is blank — figure out why"
+- "what does the 🎯 99% mean?"
+
+Claude reads the skill, runs the right `ccs` commands for you, shows you the rendered preview, and confirms before doing anything destructive. The skill ships with a `driver.sh` smoke script so Claude can sanity-check the install before driving it.
+
+Force-install: `ccs setup --with-skill`. Skip: `ccs setup --no-skill`. Remove: `ccs setup --uninstall`.
+
+## Visual editor (`ccs config edit`)
+
+When you'd rather see than type, `ccs config edit` opens a drag-and-drop editor in your browser:
+
+```sh
+ccs config edit
+```
+
+It launches a short-lived 127.0.0.1 web server (random port + auth token in the URL), opens your default browser, and presents:
+
+- **Mode tabs** at the top — click any to switch to it
+- **Lines with segment chips** — drag chips between lines, drag back to the palette to delete, click `×` to remove
+- **A palette below** with every built-in segment plus your installed `{plugin:NAME}` files
+- **Live preview** of what each line will render to (mock data, so you don't need a session yet)
+- **Save** writes `config.toml` and the server exits 5s later
+
+No long-running daemon, no dependencies — pure stdlib HTTP, idle timeout 30 minutes. Great when you have lots of segments to rearrange or you forgot the segment names.
+
+> Limitation: literal text inside templates (e.g. `cache: {cache_ttl}` in the `debug` mode) is currently dropped on save. Use `ccs mode edit` for those.
+
+## Plugins (custom segments)
+
+Need a metric cc-status doesn't ship? cc-status has a built-in scaffolder.
+
+### Hello world in 30 seconds
+
+```sh
+ccs plugin new hello                  # scaffold a sh template (recommended)
+ccs plugin run hello                  # debug-run: stdout/stderr/exit/elapsed
+ccs mode append plugin:hello          # add to current mode
+```
+
+Or start from a Python template:
+
+```sh
+ccs plugin new my-metric --lang python
+```
+
+### Manage your plugins
+
+```sh
+ccs plugin list                       # what's installed (and is it executable?)
+ccs plugin doctor                     # health-check all plugins (timing / orphans / chmod)
+ccs plugin path                       # the plugins directory
+ccs plugin run my-metric --warm       # second-run timing (skip cold-start cost)
+ccs plugin new my-metric --force      # overwrite an existing plugin file
+```
+
+`ccs plugin doctor` runs every installed plugin once warm and grades each on:
+
+- ✗ **fail** — not executable, exec error, empty file, or warm runtime > 250 ms (will time out at render time)
+- ⚠ **warn** — no shebang, non-zero exit, empty stdout, or not referenced by any mode (orphan)
+- ✓ **ok** — passes every check
+
+Use it after any non-trivial change to a plugin, or just to find files left behind from old experiments.
+
+### Contract
+
+Plugins are plain executables under `<config-dir>/plugins/<NAME>` — any
+shebanged script (sh, python, ruby, …) or compiled binary works. cc-status
+runs them as subprocesses with this contract:
+
+- The executable receives Claude Code's stdin JSON (same schema as `ccs render`) on its stdin: `{cwd, model.{id,display_name}, context_window.remaining_percentage, session_id, transcript_path}`.
+- Its **stdout** is the segment value. Newlines/tabs collapse to single spaces, ANSI SGR colors are preserved, other control chars are stripped, output clipped to 80 chars.
+- Hard **250 ms** timeout — slower plugins are killed and render as empty. Use `ccs plugin run --warm` to measure steady-state cost (macOS Gatekeeper adds 200ms+ to the first run).
+- Non-zero exit / empty stdout / missing file → segment renders as `""` (the surrounding whitespace collapses).
+- Plugins inherit the user's `$PATH` and environment.
+
+### Performance budget
+
+| Runtime | Cold start | Warm | Verdict |
+|---|---|---|---|
+| native binary (Go / Rust) | <5 ms | <5 ms | best |
+| sh / bash | 5–20 ms | 5–10 ms | great |
+| python3 | 30–80 ms | ~30 ms | OK if logic is tight |
+| node | 70–150 ms | ~70 ms | risky for complex logic |
+| any network call | 100ms+ | 100ms+ | **don't** — almost always blows budget |
+
+Plugins run **on every status-line refresh**, which means every prompt — keep them fast.
 
 ## Configuration
 
@@ -344,13 +446,18 @@ Done in 0.3.x:
 - [x] Fault-isolated segment rendering + git timeout
 - [x] `ccs setup` for one-shot `~/.claude/settings.json` wiring
 - [x] GitHub Pages site
+- [x] Plugin segments (`{plugin:NAME}` runs an executable in `<config>/plugins/`)
+- [x] `ccs plugin new` / `run` / `doctor` workflow
+- [x] Conversational helper skill installed by `ccs setup` (`~/.claude/skills/cc-status/`)
+- [x] Drag-and-drop visual mode editor (`ccs config edit`)
+- [x] Three-stage `{model}` resolution (transcript → stdin → settings) with `[1m]` tier preserved
+- [x] `{session_age}` segment
 
 Still on the list:
 
 - [ ] Re-enable Windows builds (rollup file-rotation detection needs a robust signal there)
 - [ ] Per-session colors / titles for parallel CC instances
 - [ ] Pace-aware quota burn warning
-- [ ] Plugin segments (custom shell commands)
 - [ ] Homebrew tap published
 
 ## License

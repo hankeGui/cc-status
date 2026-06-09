@@ -55,6 +55,11 @@ pub const SEGMENTS: &[SegmentInfo] = &[
         description: "Session-average token rate",
     },
     SegmentInfo {
+        name: "session_age",
+        example: "1h23m",
+        description: "Wall-clock duration since the first assistant turn (s/m/h/d)",
+    },
+    SegmentInfo {
         name: "skills",
         example: "skills: jira×3 wiki×1",
         description: "Skill calls (top 4, sorted by count)",
@@ -94,9 +99,20 @@ pub const SEGMENTS: &[SegmentInfo] = &[
         example: "[detailed]",
         description: "Current mode label (dim)",
     },
+    SegmentInfo {
+        name: "plugin:NAME",
+        example: "{plugin:weather}",
+        description: "Run <config>/plugins/NAME, capture stdout (250ms timeout, 80-char cap)",
+    },
 ];
 
 pub fn is_known(name: &str) -> bool {
+    // Dynamic plugin segments: `{plugin:NAME}` resolves at render time
+    // by execing `<config>/plugins/NAME`. We can't validate NAME against
+    // a static list, so accept any non-empty name here.
+    if let Some(rest) = name.strip_prefix("plugin:") {
+        return !rest.is_empty();
+    }
     SEGMENTS.iter().any(|s| s.name == name)
 }
 

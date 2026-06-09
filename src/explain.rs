@@ -34,6 +34,7 @@ pub fn run() -> anyhow::Result<()> {
   {DIM}cache 4:42{R}            Prompt-cache 5-min TTL countdown ({RED}red <1 min{R} / cache expired)
   {DIM}hit 96%{R}               Session-wide cumulative cache hit rate
   {DIM}🔥 32.4k/min{R}          Session-average token rate
+  {DIM}1h23m{R}                Session age (s/m/h/d) since the first assistant turn
 
 {B}Line 3 · tools used in this session{R}
   {DIM}skills: jira×3 wiki×1{R}  Skill tool calls (top 4, sorted by count)
@@ -47,6 +48,13 @@ pub fn run() -> anyhow::Result<()> {
   {DIM}last $0.012 · today $4.18{R}  {{cost}}     compact combo (cost_last + cost_today)
   Built-in prices follow Anthropic's published per-million-token rates;
   override per-model in `[pricing]` of config.toml when needed.
+
+{B}Plugin segments (opt-in){R}
+  {DIM}{{plugin:NAME}}{R}        Runs `<config-dir>/plugins/NAME` as an executable; first
+                        line of its stdout becomes the segment value. CC's stdin
+                        JSON is piped in. Hard 250ms timeout, output clipped to
+                        80 chars, control chars stripped (ANSI SGR allowed).
+                        Empty / failed / missing → renders as nothing.
 
 {B}Color meanings{R}
   {C}bold cyan{R}    path
