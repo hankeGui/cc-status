@@ -14,7 +14,7 @@ const BOLD_MAGENTA: &str = "\x1b[1;35m";
 const RED: &str = "\x1b[0;31m";
 const YELLOW: &str = "\x1b[0;33m";
 const GREEN: &str = "\x1b[0;32m";
-const DIM: &str = "\x1b[2m";
+const DIM: &str = "\x1b[90m";
 
 pub struct Ctx<'a> {
     pub stdin: &'a Value,
@@ -1018,7 +1018,7 @@ fn seg_cost_last(ctx: &Ctx) -> String {
         c.last_turn_cache_read,
         c.last_turn_cache_creation,
     );
-    format!("{}last {}{}", DIM, pricing::fmt_usd(usd), RESET)
+    format!("{}last {}{}", YELLOW, pricing::fmt_usd(usd), RESET)
 }
 
 fn seg_cost_session(ctx: &Ctx) -> String {
@@ -1040,7 +1040,7 @@ fn seg_cost_session(ctx: &Ctx) -> String {
         c.total_cache_read,
         c.total_cache_creation,
     );
-    format!("{}sess {}{}", DIM, pricing::fmt_usd(usd), RESET)
+    format!("{}sess {}{}", YELLOW, pricing::fmt_usd(usd), RESET)
 }
 
 fn rollup_cost(ctx: &Ctx, days: i64) -> Option<f64> {
@@ -1066,7 +1066,7 @@ fn seg_cost_today(ctx: &Ctx) -> String {
     if usd <= 0.0 {
         return String::new();
     }
-    format!("{}today {}{}", DIM, pricing::fmt_usd(usd), RESET)
+    format!("{}today {}{}", YELLOW, pricing::fmt_usd(usd), RESET)
 }
 
 fn seg_cost_week(ctx: &Ctx) -> String {
@@ -1076,7 +1076,7 @@ fn seg_cost_week(ctx: &Ctx) -> String {
     if usd <= 0.0 {
         return String::new();
     }
-    format!("{}7d {}{}", DIM, pricing::fmt_usd(usd), RESET)
+    format!("{}7d {}{}", YELLOW, pricing::fmt_usd(usd), RESET)
 }
 
 fn seg_cost_combo(ctx: &Ctx) -> String {

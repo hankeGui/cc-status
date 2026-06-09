@@ -11,7 +11,7 @@ use std::path::PathBuf;
 
 const RESET: &str = "\x1b[0m";
 const BOLD: &str = "\x1b[1m";
-const DIM: &str = "\x1b[2m";
+const DIM: &str = "\x1b[90m";
 const RED: &str = "\x1b[0;31m";
 const YELLOW: &str = "\x1b[0;33m";
 const GREEN: &str = "\x1b[0;32m";

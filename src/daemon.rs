@@ -22,7 +22,7 @@ const BOLD: &str = "\x1b[1m";
 const GREEN: &str = "\x1b[0;32m";
 const YELLOW: &str = "\x1b[0;33m";
 const RED: &str = "\x1b[0;31m";
-const DIM: &str = "\x1b[2m";
+const DIM: &str = "\x1b[90m";
 
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(50);
 const REPLY_TIMEOUT: Duration = Duration::from_millis(200);

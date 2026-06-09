@@ -4,7 +4,7 @@ use crate::segments_meta::SEGMENTS;
 
 const RESET: &str = "\x1b[0m";
 const BOLD: &str = "\x1b[1m";
-const DIM: &str = "\x1b[2m";
+const DIM: &str = "\x1b[90m";
 const CYAN: &str = "\x1b[1;36m";
 
 pub fn run() -> anyhow::Result<()> {
