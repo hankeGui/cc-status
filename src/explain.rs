@@ -14,65 +14,99 @@ pub fn run() -> anyhow::Result<()> {
         "\
 {B}cc-status · status-line legend{R}
 
-{B}Line 1 · environment{R}
-  {C}~/path{R}                Current directory (last 3 components, ~ for HOME)
-  {DIM}wt:NAME{R}               Git worktree name (only when inside one)
-  {M}branch{R}                Git branch
-  {DIM}⇡N{R} / {DIM}⇣N{R}              Commits ahead of / behind upstream
-  {RED}[+!?]{R}                 + staged   ! modified   ? untracked
-  {DIM}model{R}                 Model name reported by Claude Code
+{B}Where you are{R}
+  {C}~/hanke-dev/cc-status{R}    {{dir}}    last 3 path segments, HOME shown as `~`
+  {DIM}wt:foo{R}                  {{git}}    git worktree name (only inside a worktree)
+  {M}main{R}                    {{git}}    git branch
+  {DIM}⇡2{R} / {DIM}⇣1{R}                {{git}}    commits ahead of / behind upstream
+  {RED}[+!?]{R}                   {{git}}    {RED}+{R} staged   {RED}!{R} modified   {RED}?{R} untracked
+  {DIM}claude-opus-4-7 [1m]{R}     {{model}}  model id Claude Code is invoking. `[1m]`
+                                  flags the 1M-context tier. Source order:
+                                  transcript → stdin → settings.json.
 
-{B}Line 2 · this turn + cache{R}
-  ctx {GREEN}84%{R} {GREEN}█████{R} {DIM}133k/950k{R}  Remaining % + bar + used/capacity
-                        (green ≥50, yellow 20–50, red <20)
-                        capacity = backsolved physical window × CLAUDE_AUTOCOMPACT_PCT_OVERRIDE/100
-                        Default 95. A 1M Opus thus shows ~950k usable.
-  {DIM}↑12.3k{R}                Last turn's input tokens (incl. cache hit)
-  {DIM}↓341{R}                  Last turn's output tokens
-  {DIM}+865{R}                  Tokens written to cache this turn (cache_creation, 1.25× price)
-  {DIM}🎯99%{R}                 Cache hit rate of the last turn
-  {DIM}cache 4:42{R}            Prompt-cache 5-min TTL countdown ({RED}red <1 min{R} / cache expired)
-  {DIM}hit 96%{R}               Session-wide cumulative cache hit rate
-  {DIM}🔥 32.4k/min{R}          Session-average token rate
-  {DIM}1h23m{R}                Session age (s/m/h/d) since the first assistant turn
+{B}Capacity (`ctx`){R}
+  {GREEN}ctx 54% ▰▰▰▰▰{DIM}▱▱▱▱▱{R} {DIM}504.1k/1.0M{R}
+                            {{ctx}}     percent remaining + battery bar
+                                       ({GREEN}▰{R}=remaining, {DIM}▱{R}=used) +
+                                       tokens used / capacity
+                            color: {GREEN}green{R} ≥50%  {YELLOW}yellow{R} 20–50%  {RED}red{R} <20%
+                            capacity is the *physical* window backsolved
+                            from CC's `remaining_percentage`, multiplied by
+                            CLAUDE_AUTOCOMPACT_PCT_OVERRIDE/100 (default 95).
+                            That's where auto-compact actually fires.
 
-{B}Line 3 · tools used in this session{R}
-  {DIM}skills: jira×3 wiki×1{R}  Skill tool calls (top 4, sorted by count)
-  {DIM}mcp: github×2{R}         MCP-server calls (aggregated by server name)
+  {DIM}ctx-used 504.1k/1.0M{R}    {{ctx_tokens}}  numbers only, no bar/percent.
 
-{B}Cost segments (opt-in){R}
-  {DIM}last $0.012{R}           {{cost_last}}     last assistant turn (current session, current model)
-  {DIM}sess $1.42{R}            {{cost_session}}  cumulative for the current session
-  {DIM}today $4.18{R}           {{cost_today}}    every session today (local time), all models
-  {DIM}7d $24.50{R}             {{cost_week}}     last 7 days, all models
-  {DIM}last $0.012 · today $4.18{R}  {{cost}}     compact combo (cost_last + cost_today)
-  Built-in prices follow Anthropic's published per-million-token rates;
-  override per-model in `[pricing]` of config.toml when needed.
+{B}This turn{R}
+  {DIM}↑504.1k ↓618 cache+581 🎯100%{R}    {{last_turn}}
+                            ↑   input *sent to model* (incl. cache hits +
+                                cache writes). This is the actual on-wire size.
+                            ↓   output the model produced.
+                            cache+N  tokens *written* to the prompt cache
+                                this turn (cache_creation, 1.25× price now,
+                                will be 0.1× when re-hit next turn).
+                            🎯  cache-hit rate of *this single turn*
+                                (not the session). Higher = cheaper.
 
-{B}Plugin segments (opt-in){R}
-  {DIM}{{plugin:NAME}}{R}        Runs `<config-dir>/plugins/NAME` as an executable; first
-                        line of its stdout becomes the segment value. CC's stdin
-                        JSON is piped in. Hard 250ms timeout, output clipped to
-                        80 chars, control chars stripped (ANSI SGR allowed).
-                        Empty / failed / missing → renders as nothing.
+{B}Cache health{R}
+  {DIM}cache 4:42{R}              {{cache_ttl}}    countdown to the prompt-cache 5-min
+                                       TTL expiry. {RED}Red <1 min / expired{R} = next
+                                       turn pays full input price, not cache_read.
+  {DIM}hit 96%{R}                 {{hit_rate}}     session-wide cumulative cache hit
+                                       rate (every turn aggregated). Different
+                                       from {{last_turn}}'s 🎯 (last turn only).
 
-{B}Color meanings{R}
-  {C}bold cyan{R}    path
-  {M}bold magenta{R} git branch
-  {RED}red{R}          danger (dirty / low ctx / cache about to expire)
-  {YELLOW}yellow{R}       warning (ctx 20–50%)
-  {GREEN}green{R}        healthy (ctx ≥50%)
-  {DIM}dim{R}          secondary data
+{B}Session metrics{R}
+  {DIM}🔥 32.4k tok/min{R}         {{burn}}        average token throughput across
+                                       the whole session.
+  {DIM}1h23m{R}                   {{session_age}} wall-clock since the first turn:
+                                       42s / 12m / 1h23m / 2d3h.
+
+{B}Tools used{R}
+  {DIM}skills: jira×3 wiki×1{R}    {{skills}}     top-4 Skill calls × count.
+  {DIM}mcp: github×2{R}            {{mcp}}        MCP-server calls grouped by server.
+
+{B}Cost (USD){R}
+  Built-in prices follow Anthropic's published per-million-token rates.
+  Override any model in `[pricing]` of config.toml.
+
+  {YELLOW}last $0.012{R}             {{cost_last}}     last turn (current model)
+  {YELLOW}sess $1.42{R}              {{cost_session}}  cumulative for this session
+  {YELLOW}today $4.18{R}             {{cost_today}}    every session today (local-time
+                                          day buckets), all models
+  {YELLOW}7d $24.50{R}               {{cost_week}}     rolling last 7 days, all models
+  {YELLOW}last $0.012{R} {DIM}|{R} {YELLOW}today $4.18{R}   {{cost}}          combo of cost_last + cost_today
+
+{B}Plugin segments{R}
+  {DIM}{{plugin:NAME}}{R}           runs `<config>/plugins/NAME` as an executable;
+                            its stdout becomes the segment value. CC's stdin
+                            JSON is piped in. Hard 250 ms timeout, output
+                            clipped to 80 chars, control chars stripped
+                            (ANSI SGR allowed). Empty / failed / missing →
+                            renders as nothing.
+                            See `ccs plugin new` to scaffold one.
+
+{B}Color cheat-sheet{R}
+  {C}bold cyan{R}     path
+  {M}bold magenta{R}  git branch
+  {RED}red{R}           danger (dirty / low ctx / cache about to expire)
+  {YELLOW}yellow{R}        money / warning (ctx 20–50%)
+  {GREEN}green{R}         healthy (ctx ≥50%)
+  {DIM}dim/grey{R}      secondary data
 
 {B}Pricing cheat-sheet{R}
-  cache_read       0.1× normal input price (higher hit rate = cheaper)
-  cache_creation   1.25× normal input price (pricey now, but cheap on the next turn)
+  cache_read       0.1× normal input price  (higher hit rate = cheaper)
+  cache_creation   1.25× normal input price (pricey now, cheap next turn if hit)
   output           ~5× normal input price
 
 {B}Related commands{R}
-  ccs status            Detailed dashboard for the current session
-  ccs mode <name>       Switch display mode: compact / detailed / debug
-  ccs config-path       Print the config file path
+  ccs status            full dashboard for this session, every number labeled
+  ccs segments          listing of every segment with examples
+  ccs mode list         all configured display modes with rendered previews
+  ccs mode <name>       switch active mode
+  ccs config edit       drag-and-drop visual mode editor in your browser
+  ccs plugin doctor     health-check installed plugins
+  ccs config-path       print the config file path
 ",
         B = BOLD,
         R = RESET,

@@ -208,25 +208,27 @@ Prints a colored cheat-sheet of every segment, every color, every glyph.
 
 | Token | Output | Meaning |
 |---|---|---|
-| `{dir}` | `~/hanke-dev/cc-status` | Last 3 path components, `~` for HOME |
-| `{git}` | `wt:NAME branch ⇡2⇣1 [+!?]` | Worktree, branch, ahead/behind, dirty flags |
-| `{model}` | `Claude Opus 4.7` | CC's reported model |
-| `{ctx}` | `ctx 86% █████▏ 154.6k/950k` | Remaining %, bar, used / capacity |
-| `{ctx_tokens}` | `154.6k/950k` | Just the token numbers |
-| `{last_turn}` | `↑12.3k ↓2.1k +865 🎯89%` | Last turn input ↑ / output ↓ / cache write + / hit rate 🎯 |
-| `{cache_ttl}` | `cache 3:42` | Prompt-cache 5-min TTL countdown (red < 1 min) |
-| `{hit_rate}` | `hit 96%` | Session-wide cache hit rate |
-| `{burn}` | `🔥 32.4k/min` | Session-average token rate |
-| `{session_age}` | `1h23m` | Wall-clock duration since the first assistant turn (s/m/h/d) |
-| `{skills}` | `skills: jira×3 wiki×1` | Skill calls, top 4 by count |
-| `{mcp}` | `mcp: github×2` | MCP-server calls, top 4 |
-| `{cost_last}` | `last $0.012` | USD cost of the last turn (current model price) |
-| `{cost_session}` | `sess $1.42` | Cumulative USD cost for the current session |
-| `{cost_today}` | `today $4.18` | USD cost across all sessions today |
-| `{cost_week}` | `7d $24.50` | USD cost over the last 7 days |
-| `{cost}` | `last $0.012 · today $4.18` | Combo: `cost_last + cost_today` |
-| `{mode}` | `[detailed]` | Current mode label |
-| `{plugin:NAME}` | *(plugin output)* | Runs `<config>/plugins/NAME`, captures stdout (see Plugins below) |
+| `{dir}` | `~/hanke-dev/cc-status` | Last 3 path components; HOME shown as `~`. |
+| `{git}` | `wt:foo main ⇡2⇣1 [+!?]` | Git: worktree (in worktrees only), branch, ⇡ahead / ⇣behind upstream, then `+` staged, `!` modified, `?` untracked. |
+| `{model}` | `claude-opus-4-7 [1m]` | Model id Claude Code is **actually invoking**. Resolved transcript → stdin → settings.json. `[1m]` = 1M-tier. Vendor prefixes (`anthropic--`, `anthropic/`) stripped; deployment prefixes (`bedrock/`, `vertex_ai/`) kept. |
+| `{ctx}` | `ctx 54% ▰▰▰▰▰▱▱▱▱▱ 504.1k/1.0M` | Battery bar of remaining capacity (▰=remaining, ▱=used) + tokens used / capacity. Color: green ≥50%, yellow 20–50%, red <20%. Capacity is the auto-compact threshold (default 95% of physical window). |
+| `{ctx_tokens}` | `ctx-used 504.1k/1.0M` | Same numbers as `{ctx}`, no bar/percent. Use when `{ctx}` is too wide. |
+| `{last_turn}` | `↑504.1k ↓618 cache+581 🎯100%` | Most recent turn: ↑ tokens sent (incl. cache hits + writes), ↓ output, `cache+N` cache_creation, 🎯 cache-hit rate of *this turn alone*. |
+| `{cache_ttl}` | `cache 4:42` | Time left on the prompt-cache 5-min TTL. Red <1 min / expired = next turn pays full input price. |
+| `{hit_rate}` | `hit 96%` | Session-wide cumulative cache hit rate (every turn aggregated). Different from `{last_turn}`'s 🎯 (this-turn-only). |
+| `{burn}` | `🔥 32.4k tok/min` | Session-average token throughput (total tokens ÷ minutes since first turn). |
+| `{session_age}` | `1h23m` | Wall-clock duration since the first assistant turn (`42s` / `12m` / `1h23m` / `2d3h`). |
+| `{skills}` | `skills: jira×3 wiki×1` | Top-4 Skill calls × count (sorted by count). Hidden when no skills called. |
+| `{mcp}` | `mcp: github×2` | MCP-server calls grouped by server name. Hidden when no MCP tool called. |
+| `{cost_last}` | `last $0.012` | USD cost of the last turn (current model's prices, including cache discounts). |
+| `{cost_session}` | `sess $1.42` | Cumulative USD cost of the current session. |
+| `{cost_today}` | `today $4.18` | Cost across all sessions today (local-time day buckets), all models. |
+| `{cost_week}` | `7d $24.50` | Cost over the last 7 days (rolling), all models. |
+| `{cost}` | `last $0.012 \| today $4.18` | Combo of `cost_last` and `cost_today` — the two you most often want together. |
+| `{mode}` | `[balanced]` | Current display-mode name in brackets. |
+| `{plugin:NAME}` | *(plugin's stdout)* | Runs `<config>/plugins/NAME`, captures stdout. 250 ms hard timeout, 80-char cap, ANSI SGR allowed. See `ccs plugin new`. |
+
+> Need to know what a glyph means right now? Run `ccs explain` for an annotated legend, or `ccs status` for the current values with full labels.
 
 ## Conversational mode (let Claude drive cc-status for you)
 

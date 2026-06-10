@@ -363,16 +363,22 @@ fn seg_ctx(ctx: &Ctx) -> String {
     } else {
         GREEN
     };
-    let bar = progress_bar(remaining_frac, 6);
+    // Battery-style bar: filled cells (`▰`) represent *remaining*
+    // capacity (mirrors a phone battery — full = healthy, empty =
+    // about to compact). Filled cells take the health color; empty
+    // cells stay dim so the bar's outline is always visible. 10 cells
+    // = each cell is ~10% of capacity, easy to count.
+    let (filled, empty) = battery_bar(remaining_frac, 10);
     format!(
-        "{}ctx {}% {} {}{}/{}{}",
-        color,
-        pct_i,
-        bar,
-        DIM,
-        short_num(c.used),
-        short_num(c.capacity),
-        RESET
+        "{C}ctx {pct}% {filled_chars}{D}{empty_chars}{R} {D}{used}/{cap}{R}",
+        C = color,
+        pct = pct_i,
+        filled_chars = filled,
+        empty_chars = empty,
+        D = DIM,
+        R = RESET,
+        used = short_num(c.used),
+        cap = short_num(c.capacity),
     )
 }
 
@@ -430,8 +436,11 @@ fn seg_ctx_tokens(ctx: &Ctx) -> String {
     let Some(c) = compute_ctx(ctx) else {
         return String::new();
     };
+    // Prefix with `ctx-used` so a glance distinguishes this from
+    // unrelated "N/M" pairs in adjacent segments. Reads as "ctx-used
+    // 504k of 1M capacity."
     format!(
-        "{}{}/{}{}",
+        "{}ctx-used {}/{}{}",
         DIM,
         short_num(c.used),
         short_num(c.capacity),
@@ -439,22 +448,28 @@ fn seg_ctx_tokens(ctx: &Ctx) -> String {
     )
 }
 
-fn progress_bar(frac: f64, width: usize) -> String {
-    let blocks = ['▏', '▎', '▍', '▌', '▋', '▊', '▉', '█'];
-    let total_eighths = (frac.clamp(0.0, 1.0) * width as f64 * 8.0).round() as usize;
-    let full = total_eighths / 8;
-    let rem = total_eighths % 8;
-    let mut s = String::new();
-    for _ in 0..full {
-        s.push('█');
-    }
-    if full < width && rem > 0 {
-        s.push(blocks[rem - 1]);
-    }
-    while s.chars().count() < width {
-        s.push(' ');
-    }
-    s
+/// Battery-style bar: returns `(filled, empty)` as two strings of
+/// `▰` / `▱` characters respectively. Caller is expected to wrap
+/// `filled` in a health color and `empty` in DIM, so the eye reads
+/// the bar as a battery whose visible electrolyte (`▰`) shows
+/// remaining capacity at a glance.
+///
+/// `frac` is the *remaining* fraction (0.0 = empty, 1.0 = full).
+/// `width` is the total cell count. The split prefers underfilling
+/// over overfilling — at 5% with 10 cells we render 0 filled (not 1),
+/// because "5% remaining" should look almost-empty, not "1 unit
+/// already lit."
+fn battery_bar(frac: f64, width: usize) -> (String, String) {
+    let frac = frac.clamp(0.0, 1.0);
+    // Floor instead of round so a healthy-looking bar (e.g. 99%) still
+    // shows one empty cell, signaling "not quite full" — matches
+    // intuition for capacity meters.
+    let filled_n = (frac * width as f64).floor() as usize;
+    let filled_n = filled_n.min(width);
+    let empty_n = width - filled_n;
+    let filled: String = std::iter::repeat('▰').take(filled_n).collect();
+    let empty: String = std::iter::repeat('▱').take(empty_n).collect();
+    (filled, empty)
 }
 
 fn seg_last_turn(ctx: &Ctx) -> String {
@@ -478,7 +493,11 @@ fn seg_last_turn(ctx: &Ctx) -> String {
         short_num(c.last_turn_output)
     );
     if ctx.cfg.segments.last_turn.show_cache_creation && c.last_turn_cache_creation > 0 {
-        s.push_str(&format!(" +{}", short_num(c.last_turn_cache_creation)));
+        // Prefix the cache-creation count so a glance at the segment
+        // tells you "this is the cache-write count," not a stray "+N"
+        // beside the input/output arrows. Reads as "cache+N" — N tokens
+        // were *written* into the prompt cache this turn.
+        s.push_str(&format!(" cache+{}", short_num(c.last_turn_cache_creation)));
     }
     s.push_str(&format!(" 🎯{}%", hit));
     format!("{}{}{}", DIM, s, RESET)
@@ -547,7 +566,12 @@ fn seg_burn(ctx: &Ctx) -> String {
         return String::new();
     }
     let rate_per_min = total as f64 * 60_000.0 / elapsed_ms as f64;
-    format!("{}🔥 {}/min{}", DIM, short_num(rate_per_min as u64), RESET)
+    format!(
+        "{}🔥 {} tok/min{}",
+        DIM,
+        short_num(rate_per_min as u64),
+        RESET
+    )
 }
 
 fn seg_session_age(ctx: &Ctx) -> String {
@@ -624,23 +648,38 @@ mod tests {
     }
 
     #[test]
-    fn progress_bar_full_and_empty() {
-        // Empty
-        let s = progress_bar(0.0, 6);
-        assert_eq!(s.chars().count(), 6);
-        assert!(s.chars().all(|c| c == ' '));
-        // Full
-        let s = progress_bar(1.0, 6);
-        assert_eq!(s.chars().count(), 6);
-        assert!(s.chars().all(|c| c == '█'));
+    fn battery_bar_empty_and_full() {
+        let (f, e) = battery_bar(0.0, 10);
+        assert_eq!(f.chars().count(), 0);
+        assert_eq!(e.chars().count(), 10);
+        assert!(e.chars().all(|c| c == '▱'));
+
+        let (f, e) = battery_bar(1.0, 10);
+        assert_eq!(f.chars().count(), 10);
+        assert_eq!(e.chars().count(), 0);
+        assert!(f.chars().all(|c| c == '▰'));
     }
 
     #[test]
-    fn progress_bar_half() {
-        let s = progress_bar(0.5, 6);
-        assert_eq!(s.chars().count(), 6);
-        let full = s.chars().filter(|&c| c == '█').count();
-        assert_eq!(full, 3, "half of 6 wide should give 3 full blocks");
+    fn battery_bar_half() {
+        let (f, e) = battery_bar(0.5, 10);
+        assert_eq!(f.chars().count(), 5);
+        assert_eq!(e.chars().count(), 5);
+    }
+
+    #[test]
+    fn battery_bar_floors_to_avoid_phantom_fill() {
+        // 5% with 10 cells: would round to 1 cell filled, but we
+        // floor — at "5% remaining" the bar must look almost-empty,
+        // not "1 unit already lit." Floor matches user intuition.
+        let (f, _) = battery_bar(0.05, 10);
+        assert_eq!(f.chars().count(), 0, "5% should not fill any cell");
+
+        // 99%: similarly, floor gives 9 filled (not 10), so the
+        // bar visibly registers "not yet topped out."
+        let (f, e) = battery_bar(0.99, 10);
+        assert_eq!(f.chars().count(), 9);
+        assert_eq!(e.chars().count(), 1);
     }
 
     #[test]
@@ -1088,7 +1127,7 @@ fn seg_cost_combo(ctx: &Ctx) -> String {
         (true, true) => String::new(),
         (false, true) => last,
         (true, false) => today,
-        (false, false) => format!("{} · {}", last, today),
+        (false, false) => format!("{} {DIM}|{R} {}", last, today, DIM = DIM, R = RESET),
     }
 }
 

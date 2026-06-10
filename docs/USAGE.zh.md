@@ -326,25 +326,27 @@ lines = [
 
 | 段 | 示例 | 含义 |
 |---|---|---|
-| `{dir}` | `~/hanke-dev/cc-status` | 当前目录最后 3 段，`~` 代表 HOME |
-| `{git}` | `wt:foo main ⇡2⇣1 [+!?]` | worktree 名 / 分支 / 领先落后 / 暂存!修改?未跟踪 |
-| `{model}` | `Claude Opus 4.7` | CC 报告的模型名 |
-| `{ctx}` | `ctx 86% █████▏ 154.6k/950k` | 剩余 % + 进度条 + 已用/可用容量 |
-| `{ctx_tokens}` | `154.6k/950k` | 只显示 token 数 |
-| `{last_turn}` | `↑12.3k ↓2.1k +865 🎯89%` | 上一轮 input↑ / output↓ / 写入 cache+ / 命中率🎯 |
-| `{cache_ttl}` | `cache 3:42` | prompt cache 5min TTL 倒计时（红 < 1min） |
-| `{hit_rate}` | `hit 96%` | 整会话累计命中率 |
-| `{burn}` | `🔥 32.4k/min` | 会话平均 token 速率 |
-| `{session_age}` | `1h23m` | 距第一次 assistant 回复的时长（s/m/h/d）|
-| `{skills}` | `skills: jira×3 wiki×1` | Skill 调用次数（按次数倒序，最多 4 个） |
-| `{mcp}` | `mcp: github×2` | MCP 服务器调用次数 |
-| `{cost_last}` | `last $0.012` | 上一轮花了多少美元（按当前模型价格） |
-| `{cost_session}` | `sess $1.42` | 整个当前会话累计成本（USD）|
-| `{cost_today}` | `today $4.18` | 今天（UTC 日）所有会话累计成本 |
-| `{cost_week}` | `7d $24.50` | 最近 7 天累计成本 |
-| `{cost}` | `last $0.012 · today $4.18` | `cost_last + cost_today` 的组合 |
-| `{mode}` | `[detailed]` | 当前模式名 |
-| `{plugin:NAME}` | *（插件输出）* | 跑 `<config>/plugins/NAME` 拿 stdout（见下方"插件段"）|
+| `{dir}` | `~/hanke-dev/cc-status` | 当前目录最后 3 段；HOME 显示为 `~`。 |
+| `{git}` | `wt:foo main ⇡2⇣1 [+!?]` | git: worktree（仅在 worktree 内）/ 分支 / 领先⇡落后⇣上游 / `+` 已暂存 `!` 已修改 `?` 未跟踪。 |
+| `{model}` | `claude-opus-4-7 [1m]` | Claude Code **实际调用**的 model id。优先级：transcript → stdin → settings.json。`[1m]` 表示 1M 上下文档位。会剃掉 `anthropic--` / `anthropic/` 噪音前缀，但保留 `bedrock/` / `vertex_ai/` 等部署目标前缀。 |
+| `{ctx}` | `ctx 54% ▰▰▰▰▰▱▱▱▱▱ 504.1k/1.0M` | 电池条：剩余容量百分比 + 形象化电量条（▰=剩余，▱=已用）+ 已用/容量。颜色：≥50% 绿 / 20–50% 黄 / <20% 红。容量是 auto-compact 触发阈值（默认物理窗口的 95%）。 |
+| `{ctx_tokens}` | `ctx-used 504.1k/1.0M` | 只显示数字，无条无百分比。当 `{ctx}` 太宽时用。 |
+| `{last_turn}` | `↑504.1k ↓618 cache+581 🎯100%` | 最近一轮：↑ 发给模型的 token（含 cache hit + cache write）/ ↓ 输出 / `cache+N` 这一轮写入 cache 的量 / 🎯 **本轮单独**的 cache 命中率。 |
+| `{cache_ttl}` | `cache 4:42` | prompt cache 5 分钟 TTL 倒计时。<1 分钟或已过期变红 — 下一轮会按全价 input 算钱，不走 cache_read 折扣。 |
+| `{hit_rate}` | `hit 96%` | 整会话累计 cache 命中率（所有轮聚合）。跟 `{last_turn}` 的 🎯（仅最近一轮）不同。 |
+| `{burn}` | `🔥 32.4k tok/min` | 会话平均 token 吞吐（总 token ÷ 距首轮分钟数）。 |
+| `{session_age}` | `1h23m` | 距第一次 assistant 回复的时长：`42s` / `12m` / `1h23m` / `2d3h`。 |
+| `{skills}` | `skills: jira×3 wiki×1` | Skill 调用前 4（按次数倒序）。无调用时此段隐藏。 |
+| `{mcp}` | `mcp: github×2` | MCP 服务器调用按服务器名聚合。无调用时此段隐藏。 |
+| `{cost_last}` | `last $0.012` | 上一轮花了多少美元（按当前模型价格，含 cache 折扣）。 |
+| `{cost_session}` | `sess $1.42` | 整个当前会话累计成本（USD）。 |
+| `{cost_today}` | `today $4.18` | 今天（本地时间日）所有会话所有模型累计。 |
+| `{cost_week}` | `7d $24.50` | 最近 7 天滚动窗口累计。 |
+| `{cost}` | `last $0.012 \| today $4.18` | `cost_last` + `cost_today` 的紧凑组合。 |
+| `{mode}` | `[balanced]` | 当前 mode 名。 |
+| `{plugin:NAME}` | *（插件 stdout）* | 跑 `<config>/plugins/NAME`，stdout 作为段值。250ms 硬超时，80 字符上限，允许 ANSI SGR。见 `ccs plugin new`。 |
+
+> 状态栏看到字符串不知道含义？跑 `ccs explain` 看图例，或 `ccs status` 看当前会话各项数据带完整标签。
 
 ### 插件段（自定义命令）
 

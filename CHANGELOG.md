@@ -4,6 +4,65 @@ All notable user-facing changes to **cc-status** are recorded here.
 Versions follow [SemVer](https://semver.org/) (pre-1.0: minor bumps for
 new features, patch bumps for fixes).
 
+## [0.4.2] — 2026-06-10
+
+Readability pass — every segment now self-explains, and a couple of
+glyphs that meant nothing to new users now mean something.
+
+### Battery-style `{ctx}`
+
+Old: `ctx 54% ███▎ 154.6k/950k` — was `54%` *used* or *remaining*? The
+fractional bar `███▎` looked like a 3/8-full progress meter, but the
+`54%` was actually *remaining*. Confusing.
+
+New: `ctx 54% ▰▰▰▰▰▱▱▱▱▱ 504.1k/1.0M` — battery metaphor. `▰` =
+remaining capacity (colored by health), `▱` = used (dim). Bar length
+fixed at 10 cells; each cell ≈ 10%. Matches the percent reading.
+
+### `{last_turn}` and `{burn}` made unambiguous
+
+| Old | New | Why |
+|---|---|---|
+| `↑504.1k ↓618 +581 🎯100%` | `↑504.1k ↓618 cache+581 🎯100%` | `+581` was opaque — now `cache+N` reads as "cache writes." |
+| `🔥 32.4k/min` | `🔥 32.4k tok/min` | Adds the unit so users don't have to guess what's per-minute. |
+
+### `{ctx_tokens}` gets a label
+
+Old: `504.1k/1.0M` — looked like a stray ratio next to other segments.
+New: `ctx-used 504.1k/1.0M` — matches `{ctx}` visually.
+
+### `{cost}` separator clarified
+
+Old: `last $0.012 · today $4.18` — `·` is hard to see on dark themes.
+New: `last $0.012 | today $4.18` — clear vertical separator.
+
+### `ccs explain` rewritten
+
+The legend used to be a flat list; now it's grouped (Where you are /
+Capacity / This turn / Cache health / Session metrics / Tools used /
+Cost / Plugins) with a per-segment description that disambiguates
+emoji glyphs (🎯 = this-turn-only hit rate vs. `{hit_rate}` =
+session-wide).
+
+The README and `docs/USAGE.zh.md` segment tables got the same
+treatment — every row now spells out what each part of the output
+actually means.
+
+### Web editor: "↺ restore defaults" button
+
+`ccs config edit` now has a one-click restore for accidentally-deleted
+built-in modes. Adds back any of `balanced` / `compact` / `minimal` /
+`detailed` / `cost` / `tokens` / `tools` that's missing without
+touching custom modes. Helps recover when a user (or a script) deletes
+a default mode and can't remember its template.
+
+### Other
+
+- segments_meta catalog rewritten — every description is now one
+  prose sentence rather than a slash-separated abbreviation.
+- All test fixtures + integration tests updated for the new output;
+  84 unit + 42 integration passing.
+
 ## [0.4.1] — 2026-06-09
 
 Theme readability and skill freshness fixes.

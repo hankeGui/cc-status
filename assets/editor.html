@@ -230,6 +230,18 @@ function rerender() {
   newBtn.onclick = newMode;
   bar.appendChild(newBtn);
 
+  // "Restore defaults" — re-add any built-in mode (balanced, compact,
+  // detailed, …) that the user has deleted, without touching custom
+  // modes they've kept. Quietly does nothing if every default is
+  // already present. Critical safety net: easy to delete a default by
+  // accident, hard to remember its exact template.
+  const restoreBtn = document.createElement("button");
+  restoreBtn.className = "new-mode";
+  restoreBtn.textContent = "↺ restore defaults";
+  restoreBtn.title = "Re-add any built-in mode you've deleted; keeps your custom modes.";
+  restoreBtn.onclick = restoreDefaults;
+  bar.appendChild(restoreBtn);
+
   // Mode editor
   const editor = document.getElementById("mode-editor");
   editor.innerHTML = "";
@@ -438,6 +450,56 @@ function newMode() {
   while (state.modes[n]) n = "untitled-" + (++i);
   state.modes[n] = { lines: [[]] };
   activeMode = n;
+  rerender();
+}
+
+// Built-in mode lineup. Must stay in sync with `Default for Config`
+// in src/config.rs — that's the canonical source. We duplicate it here
+// so Restore Defaults can work without a server round-trip.
+const DEFAULT_MODES = {
+  balanced: [
+    ["dir", "git", "model", "ctx"],
+    ["session_age", "last_turn", "cost_last", "cost_session", "hit_rate", "burn"],
+    ["skills", "mcp"],
+  ],
+  compact: [["dir", "git", "model", "ctx"]],
+  minimal: [["dir", "ctx"]],
+  detailed: [
+    ["dir", "git", "model"],
+    ["ctx", "last_turn", "hit_rate", "burn"],
+    ["skills", "mcp"],
+  ],
+  cost: [
+    ["dir", "git", "model", "ctx"],
+    ["cost_last", "cost_session", "cost_today", "cost_week"],
+  ],
+  tokens: [
+    ["dir", "git", "ctx"],
+    ["last_turn", "hit_rate", "burn"],
+  ],
+  tools: [
+    ["dir", "git", "model", "ctx"],
+    ["skills"],
+    ["mcp"],
+  ],
+  // `debug` mode includes literal text labels (`cache: `, `last: `, …)
+  // that the editor's chip-based round-trip cannot represent. Skip it
+  // here — users who want debug back should run `ccs mode add debug ...`
+  // from the CLI or accept the chip-only version.
+};
+
+function restoreDefaults() {
+  let added = [];
+  for (const [name, lines] of Object.entries(DEFAULT_MODES)) {
+    if (state.modes[name]) continue;     // already present, keep user's version
+    state.modes[name] = { lines: lines.map(l => l.slice()) };
+    added.push(name);
+  }
+  if (added.length === 0) {
+    toast("all built-in modes already present");
+    return;
+  }
+  toast("restored: " + added.join(", "));
   rerender();
 }
 
